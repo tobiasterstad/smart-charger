@@ -233,7 +233,6 @@ class ZaptecClient:
         response_text = response.text
         if response.status_code != 200:
             raise Exception(f"Failed to get charger details: {response.status_code} {response_text}")
-        print(response_text)
         return ChargerDetail.model_validate_json(response_text)
 
     def get_charger_state(self, charger_id: str) -> ChargerStateResponse:
@@ -256,10 +255,7 @@ class ZaptecClient:
         }
         response = requests.post(url, json=body, headers=headers)
         if response.status_code != 200:
-            print(response.text)
             raise Exception(f"Failed to update charger: {response.status_code} {response.text}")
-
-        print(response.text)
 
     def send_charger_command(self, charger_id: str, command_id: ChargerCommands) -> None:
         url = f"https://api.zaptec.com/api/chargers/{charger_id}/sendCommand/{command_id.value}"
@@ -269,5 +265,4 @@ class ZaptecClient:
         }
         response = requests.post(url, headers=headers)
         if response.status_code != 200:
-            print(response.text)
             raise Exception(f"Failed to update charger: {response.status_code} {response.text}")

@@ -1,6 +1,5 @@
 import abc
 import logging
-from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 from pydantic import BaseModel, PrivateAttr
