@@ -3,20 +3,19 @@ import datetime
 import logging
 import math
 import uuid
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from smart_charger.config import ChargerConfiguration, VehicleConfig
 from smart_charger.tibber.tibber_util import TibberPrices
+from smart_charger.vehicle import VehicleStatus
 
 logger = logging.getLogger(__name__)
 
 
-class VehicleStatus(BaseModel):
-    id: str = ""
-    soc: int = 0
-    connected: bool = False
+# Helper to obtain current time; can be patched in tests without replacing datetime types
+def get_now() -> datetime.datetime:
+    return datetime.datetime.now()
 
 
 class ChargingStep(BaseModel):
@@ -51,7 +50,7 @@ class ChargingPlan(BaseModel):
 
     def get_charging_step(self, timestamp: Optional[datetime.datetime] = None, solar_priority=False) -> Optional[ChargingStep]:
         if not timestamp:
-            timestamp = datetime.datetime.now()
+            timestamp = get_now()
         for step in self.steps:
             if step.start_time <= timestamp <= step.stop_time and step.solar_priority == solar_priority:
                 return step
@@ -76,7 +75,7 @@ class BasePlanner(abc.ABC):
 
     @staticmethod
     def _get_timestamp_from_hour(time: str, increment_days: int = 0) -> datetime.datetime:
-        now = datetime.datetime.now()
+        now = get_now()
         hour, minute = map(int, time.split(":"))
         planned_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         planned_time += datetime.timedelta(days=increment_days)
@@ -84,7 +83,7 @@ class BasePlanner(abc.ABC):
 
     @staticmethod
     def _get_timestamp_hours_from_now(hours: int) -> datetime.datetime:
-        return datetime.datetime.now() + datetime.timedelta(hours=hours)
+        return get_now() + datetime.timedelta(hours=hours)
 
     @staticmethod
     def _get_planned_energy(vehicle: VehicleStatus, vehicle_config: VehicleConfig) -> float:
@@ -132,12 +131,13 @@ class HourlyPlanner(BasePlanner):
         # Between 00:00 to 07:00 the current should be 16A
         # All other times, the current should be 6A
         # It is possible that there is not enough time to charge all hours.
-        # If charging is quicker, priotitize the hours between 00:00 - 07:00.
+        # If charging is quicker, prioritize the hours between 00:00 - 07:00.
 
+        now = get_now()
         plan = ChargingPlan(
             vehicle_id=vehicle.id,
-            start_time=datetime.datetime.now(),
-            stop_time=datetime.datetime.now() + datetime.timedelta(hours=planned_charge_hours),
+            start_time=now,
+            stop_time=now + datetime.timedelta(hours=planned_charge_hours),
             target_soc=vehicle_config.target_soc,
             energy_kwh=planned_energy_kwh,
             charge_hours=planned_charge_hours,
@@ -183,10 +183,11 @@ class BasicPlanner(BasePlanner):
         planned_energy_kwh = self._get_planned_energy(vehicle, vehicle_config)
         planned_charge_hours = self.get_charge_hours(planned_energy_kwh)
 
+        now = get_now()
         plan = ChargingPlan(
             vehicle_id=vehicle.id,
-            start_time=datetime.datetime.now(),
-            stop_time=datetime.datetime.now() + datetime.timedelta(hours=planned_charge_hours),
+            start_time=now,
+            stop_time=now + datetime.timedelta(hours=planned_charge_hours),
             target_soc=vehicle_config.target_soc,
             energy_kwh=planned_energy_kwh,
             charge_hours=planned_charge_hours,
@@ -244,7 +245,7 @@ class SimpleHourPlanner(BasePlanner):
         planned_energy_kwh = self._get_planned_energy(vehicle, vehicle_config)
         planned_charge_hours = int(self.get_charge_hours(planned_energy_kwh))
 
-        now = datetime.datetime.now()
+        now = get_now()
         # Choose the night window to prioritize:
         # - If it's currently before 07:00, prioritize the current day's 00:00..07:00 (remaining hours until 07:00)
         # - Otherwise, prioritize the next day's 00:00..07:00
@@ -369,7 +370,7 @@ class PriceAwarePlanner(BasePlanner):
             self.tariff_provider = tariff_provider
         elif tibber_prices is not None:
             # local import to avoid circular dependency
-            from smart_charger.smart_charger.tibber_adapter import TibberPricesAdapter
+            from smart_charger.tibber_adapter import TibberPricesAdapter
             self.tariff_provider = TibberPricesAdapter(tibber_prices, fallback_price=fallback_price)
         else:
             self.tariff_provider = None
@@ -379,9 +380,9 @@ class PriceAwarePlanner(BasePlanner):
         planned_energy_kwh = self._get_planned_energy(vehicle, vehicle_config)
 
         if planned_energy_kwh <= 0:
-            return ChargingPlan(vehicle_id=vehicle.id, start_time=datetime.datetime.now(), stop_time=datetime.datetime.now(), target_soc=vehicle_config.target_soc, energy_kwh=0, charge_hours=0, steps=[])
+            return ChargingPlan(vehicle_id=vehicle.id, start_time=get_now(), stop_time=get_now(), target_soc=vehicle_config.target_soc, energy_kwh=0, charge_hours=0, steps=[])
 
-        now = datetime.datetime.now()
+        now = get_now()
         # Choose night window same as SimpleHourPlanner
         if now.hour < 7:
             night_start = self._get_timestamp_from_hour("00:00", increment_days=0)
@@ -390,7 +391,7 @@ class PriceAwarePlanner(BasePlanner):
             night_start = self._get_timestamp_from_hour("00:00", increment_days=1)
             night_end = self._get_timestamp_from_hour("07:00", increment_days=1)
 
-        # build list of candidate hour start datetimes from now (rounded up to next hour) until night_end
+        # build list of candidate hour start datetime from now (rounded up to next hour) until night_end
         start_hour = now.replace(minute=0, second=0, microsecond=0)
         if now.minute > 0 or now.second > 0 or now.microsecond > 0:
             start_hour += datetime.timedelta(hours=1)

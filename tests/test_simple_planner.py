@@ -1,9 +1,6 @@
 import datetime
 import math
 import unittest
-from unittest.mock import patch
-
-import pytest
 
 from smart_charger import planner
 from smart_charger.config import ChargerConfiguration
@@ -11,21 +8,29 @@ from smart_charger.planner import SimpleHourPlanner, VehicleStatus
 
 class TestPlanner(unittest.TestCase):
 
-    def set_now(self, monkeypatch, fixed_dt: datetime.datetime):
-        # Replace basicplanner.datetime.datetime with a subclass whose now() returns fixed_dt
-        class FixedDateTime(datetime.datetime):
-            @classmethod
-            def now(cls, tz=None):
-                return fixed_dt
+    def setUp(self):
+        # keep track of active patchers so we can stop them in tearDown
+        self._patchers = []
 
-        monkeypatch.setattr(planner.datetime, 'datetime', FixedDateTime)
+    def tearDown(self):
+        for p in reversed(self._patchers):
+            try:
+                p.stop()
+            except Exception:
+                pass
+        self._patchers = []
+
+    def set_now(self, fixed_dt: datetime.datetime):
+        # Patch planner.get_now to return fixed_dt
+        p = __import__('unittest.mock').mock.patch.object(planner, 'get_now', lambda: fixed_dt)
+        p.start()
+        self._patchers.append(p)
 
 
-    @patch('')
-    def test_simple_planner_prioritizes_night_when_enough_time(self, monkeypatch):
+    def test_simple_planner_prioritizes_night_when_enough_time(self):
         # now = 2026-01-22 20:00 -> full night window next day is available (7h)
         fixed_dt = datetime.datetime(2026, 1, 22, 20, 0)
-        self.set_now(monkeypatch, fixed_dt)
+        self.set_now(fixed_dt)
 
         config = ChargerConfiguration.load_defaults()
         planner = SimpleHourPlanner(config)
@@ -45,10 +50,10 @@ class TestPlanner(unittest.TestCase):
         assert step.stop_time.hour == 7
 
 
-    def test_simple_planner_limited_time_prioritizes_night(self, monkeypatch):
+    def test_simple_planner_limited_time_prioritizes_night(self):
         # now inside night window (2026-01-23 05:00), only 2 hours until 07:00
         fixed_dt = datetime.datetime(2026, 1, 23, 5, 0)
-        self.set_now(monkeypatch, fixed_dt)
+        self.set_now(fixed_dt)
 
         config = ChargerConfiguration.load_defaults()
         planner = SimpleHourPlanner(config)
@@ -67,10 +72,10 @@ class TestPlanner(unittest.TestCase):
         assert math.isclose(duration_hours, 2, rel_tol=0.2)
 
 
-    def test_simple_planner_day_and_night_split(self, monkeypatch):
+    def test_simple_planner_day_and_night_split(self):
         # now = 2026-01-22 18:00, many hours available; expect night prioritized then daytime hours
         fixed_dt = datetime.datetime(2026, 1, 22, 18, 0)
-        self.set_now(monkeypatch, fixed_dt)
+        self.set_now(fixed_dt)
 
         config = ChargerConfiguration.load_defaults()
         planner = SimpleHourPlanner(config)
@@ -96,10 +101,10 @@ class TestPlanner(unittest.TestCase):
             assert day_step.current == 6
 
 
-    def test_simple_planner_zero_energy(self, monkeypatch):
+    def test_simple_planner_zero_energy(self):
         # If vehicle already at target SOC, planner should return empty steps
         fixed_dt = datetime.datetime(2026, 1, 22, 12, 0)
-        self.set_now(monkeypatch, fixed_dt)
+        self.set_now(fixed_dt)
 
         config = ChargerConfiguration.load_defaults()
         planner = SimpleHourPlanner(config)

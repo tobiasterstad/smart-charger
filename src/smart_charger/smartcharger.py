@@ -1,17 +1,14 @@
+import asyncio
 import datetime
+import logging
 from argparse import ArgumentParser
 from typing import Optional
 
-import asyncio
-
-import logging
-
 from smart_charger import secret
-from smart_charger.config import ChargerConfiguration, ChargerType
 from smart_charger.chargers import BaseCharger, CtekCharger, ZaptecCharger, ZaptecSettings
+from smart_charger.config import ChargerConfiguration, ChargerType
 from smart_charger.messages import MessageListener, MessageSender
-from smart_charger.planner import BasicPlanner, VehicleStatus, ChargingStep, HourlyPlanner, \
-    SimpleHourPlanner, PriceAwarePlanner
+from smart_charger.planner import VehicleStatus, ChargingStep, SimpleHourPlanner
 from smart_charger.session import SessionManager, ChargingSession
 from smart_charger.zaptec import OperatingMode
 
@@ -106,20 +103,23 @@ class SmartCharger:
 
         self.session_manager.archive_sessions()
 
-    def _on_charge_start(self, session: ChargingSession, new_charging_step: ChargingStep):
+    @staticmethod
+    def _on_charge_start(session: ChargingSession, new_charging_step: ChargingStep):
         logger.info("Starting charging")
         status = session.charger.get_status()
         if status == OperatingMode.Connected_Requesting:
             session.charger.start_charging()
         session.charger.set_current(new_charging_step.current)
 
-    def _on_charge_stop(self, session: ChargingSession, previous_charging_step: ChargingStep):
+    @staticmethod
+    def _on_charge_stop(session: ChargingSession)   :
         logger.info("Stopped charging")
         status = session.charger.get_status()
         if status == OperatingMode.Connected_Charging:
             session.charger.stop_charging()
 
-    def _on_changed_charging_step(self, session: ChargingSession, previous_charging_step: ChargingStep, charging_step: ChargingStep):
+    @staticmethod
+    def _on_changed_charging_step(session: ChargingSession, previous_charging_step: ChargingStep, charging_step: ChargingStep):
         logger.info(f"Changed charging step {charging_step.id}")
         if previous_charging_step.current != charging_step.current:
             session.charger.set_current(charging_step.current)
@@ -157,10 +157,9 @@ class SmartCharger:
                         self._on_changed_charging_step(session, previous_charging_step, charging_step)
                     elif not charging_step and charger and charger.charging:
                         logger.info("Stop charging")
-                        previous_charging_step = plan.active_step
                         charger.charging = False
                         plan.active_step = None
-                        self._on_charge_stop(session, previous_charging_step)
+                        self._on_charge_stop(session)
 
                 await asyncio.sleep(check_interval_seconds)
         except asyncio.CancelledError:
