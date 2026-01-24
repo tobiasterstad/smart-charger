@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "smart_charger"
+version = "2.0.0"
+description = ""
+authors = ["Tobias Terstad <tobias.terstad@astrazeneca.com>"]
+readme = "README.md"
+packages = [
+    { include = "smart_charger", from = "src" }
+]
+include = ["settings.yaml"]
+
+[tool.poetry.dependencies]
+python = "^3.13"
+pydantic = "^2.12.5"
+pyyaml = "^6.0.3"
+click = "^8.3.1"
+requests = "^2.32.5"
+paho-mqtt = "^2.1.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+mqtt-tool = "tools.mqtt:main"
+smart-charger = "smart_charger.smartcharger:main"
