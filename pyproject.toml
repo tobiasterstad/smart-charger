@@ -2,7 +2,7 @@
 name = "smart_charger"
 version = "2.0.0"
 description = ""
-authors = [{ name = "Tobias Terstad", email = "tobias.terstad@astrazeneca.com" }]
+authors = [{ name = "Tobias Terstad", email = "tobias@terstad.se" }]
 requires-python = ">=3.13.0"
 readme = "README.md"
 classifiers = [
@@ -33,8 +33,8 @@ dev = [
 [tool.hatch.build.targets.sdist]
 include = ["src/smart_charger"]
 
-[tool.hatch.build.targets.sdist.force-include]
-"settings.yaml" = "settings.yaml"
+#[tool.hatch.build.targets.sdist.force-include]
+#"settings.yaml" = "settings.yaml"
 
 [tool.hatch.build.targets.wheel]
 include = ["src/smart_charger"]

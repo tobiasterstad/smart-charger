@@ -49,7 +49,7 @@ class SmartCharger:
             )
 
         self.power_consumption: float = 0.0
-        self.charging = False
+        self.power_production: float = 0.0
         self.session_manager = SessionManager()
         self.planner = SimpleHourPlanner(self.config)
 
@@ -67,6 +67,7 @@ class SmartCharger:
         self.message_listener.add_on_connected_vehicle_listener(self.session_manager.connected_vehicle)
         self.message_listener.add_on_target_reached_listeners(self._on_target_reached)
         self.message_listener.add_on_power_consumption_updated(self._on_updated_power_consumption)
+        self.message_listener.add_on_power_production_changed(self._on_power_production_changed)
 
         self.message_sender = MessageSender(self.config)
 
@@ -107,7 +108,7 @@ class SmartCharger:
     def _on_charge_start(session: ChargingSession, new_charging_step: ChargingStep):
         logger.info("Starting charging")
         status = session.charger.get_status()
-        if status == OperatingMode.Connected_Requesting:
+        if status in [OperatingMode.Connected_Requesting, OperatingMode.Connected_Finished]:
             session.charger.start_charging()
         session.charger.set_current(new_charging_step.current)
 
@@ -134,6 +135,10 @@ class SmartCharger:
     def _on_updated_power_consumption(self, power):
         logger.debug(f"Received power consumption: {power} watts")
         self.power_consumption = power
+
+    def _on_power_production_changed(self, power: float):
+        logger.debug(f"Received power production: {power} watts")
+        self.power_production = power
 
     async def charger_loop(self, check_interval_seconds: int = 10):
         """Async loop that controls the chargers."""

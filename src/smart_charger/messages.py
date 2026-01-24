@@ -1,6 +1,6 @@
 import random
 import logging
-from typing import Callable
+from typing import Callable, Any
 
 from smart_charger.chargers import BaseCharger
 from smart_charger.config import ChargerConfiguration
@@ -25,7 +25,8 @@ class MessageListener:
         self._on_connected_charger_listeners: list[Callable[[BaseCharger], None]] = []
         self._on_connected_vehicle_listeners: list[Callable[[VehicleStatus], None]] = []
         self._on_target_reached_listeners: list[Callable[[VehicleStatus], None]] = []
-        self._on_power_consumption_updated: list[Callable[[float], None]] = []
+        self._on_power_consumption_changed: list[Callable[[float], None]] = []
+        self._on_power_production_changed: list[Callable[[float], None]] = []
 
     def add_on_connected_charger_listener(self, callback: Callable[[BaseCharger], None]) -> None:
         self._on_connected_charger_listeners.append(callback)
@@ -37,7 +38,10 @@ class MessageListener:
         self._on_target_reached_listeners.append(callback)
 
     def add_on_power_consumption_updated(self, callback: Callable[[float], None]) -> None:
-        self._on_power_consumption_updated.append(callback)
+        self._on_power_consumption_changed.append(callback)
+
+    def add_on_power_production_changed(self, callback: Callable[[float], None]) -> None:
+        self._on_power_production_changed.append(callback)
 
     def connect_mqtt(self):
         def on_connect(client, userdata, flags, rc):
@@ -63,7 +67,14 @@ class MessageListener:
                     if charger_status.connected != value:
                         charger_status.connected = value
                         logger.info(f"Updated {charger_config.name} connected to {charger_status.connected}")
-                        self._trigger_connected_charger(charger_status)
+                        self._trigger_listeners(self._on_connected_charger_listeners, charger_status)
+
+                elif msg.topic == charger_config.status_topic:
+                    value = charger_status.get_connected_from_status(msg)
+                    if charger_status.connected != value:
+                        charger_status.connected = value
+                        logger.info(f"Updated {charger_config.name} connected to {charger_status.connected}")
+                        self._trigger_listeners(self._on_connected_charger_listeners, charger_status)
 
             for vehicle in self.config.vehicles:
                 vehicle_status = SessionManager.get_vehicle_status_by_id(vehicle.id, self.vehicles)
@@ -72,14 +83,14 @@ class MessageListener:
                     if vehicle_status.connected != value:
                         vehicle_status.connected = value
                         logger.info(f"Updated {vehicle.name} connected to {vehicle_status.connected}")
-                        self._trigger_connected_vehicle(vehicle_status)
+                        self._trigger_listeners(self._on_connected_vehicle_listeners, vehicle_status)
 
                 elif msg.topic == vehicle.soc_topic:
                     try:
                         vehicle_status.soc = int(msg.payload.decode())
                         logger.info(f"Updated {vehicle.name} SOC to {vehicle_status.soc}")
                         if vehicle_status.soc >= vehicle.target_soc:
-                            self._trigger_target_reached(vehicle_status)
+                            self._trigger_listeners(self._on_target_reached_listeners, vehicle_status)
 
                     except ValueError:
                         logger.error(f"Invalid SOC payload for {vehicle.name}: {msg.payload}")
@@ -87,7 +98,14 @@ class MessageListener:
             if msg.topic == self.config.power_consumption_topic:
                 try:
                     power = float(msg.payload.decode())
-                    self._trigger_power_consumption_updated(power)
+                    self._trigger_listeners(self._on_power_consumption_changed, power)
+                except ValueError:
+                    logger.error(f"Invalid power payload: {msg.payload}")
+
+            if msg.topic == self.config.power_production_topic:
+                try:
+                    power = float(msg.payload.decode())
+                    self._trigger_listeners(self._on_power_production_changed, power)
                 except ValueError:
                     logger.error(f"Invalid power payload: {msg.payload}")
 
@@ -107,21 +125,10 @@ class MessageListener:
         client.subscribe(self.config.power_consumption_topic)
         client.on_message = on_message
 
-    def _trigger_connected_charger(self, charger_status: BaseCharger):
-        for listener in self._on_connected_charger_listeners:
-            listener(charger_status)
-
-    def _trigger_connected_vehicle(self, vehicle: VehicleStatus):
-        for listener in self._on_connected_vehicle_listeners:
-            listener(vehicle)
-
-    def _trigger_target_reached(self, vehicle: VehicleStatus):
-        for listener in self._on_target_reached_listeners:
-            listener(vehicle)
-
-    def _trigger_power_consumption_updated(self, power: float):
-        for listener in self._on_power_consumption_updated:
-            listener(power)
+    @staticmethod
+    def _trigger_listeners(listeners: list[Callable[[Any], None]], value: Any):
+        for listener in listeners:
+            listener(value)
 
     def start(self):
         self.client = self.connect_mqtt()

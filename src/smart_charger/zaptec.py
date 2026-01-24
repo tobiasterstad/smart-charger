@@ -101,6 +101,45 @@ class OperatingMode(enum.Enum):
     Connected_Charging = 3
     Connected_Finished = 5
 
+    @staticmethod
+    def from_name(name: Optional[str]):
+        """Return the OperatingMode matching the provided name.
+
+        Matching is case-insensitive and ignores non-alphanumeric characters
+        (spaces, underscores, dashes, dots). If the input is a numeric string
+        matching an enum value, that enum member is returned. If no match is
+        found, OperatingMode.Unknown is returned.
+        """
+        if not name:
+            return OperatingMode.Unknown
+
+        def normalize(s: str) -> str:
+            return ''.join(ch for ch in s.lower() if ch.isalnum())
+
+        norm = normalize(name)
+
+        # Direct name match after normalization
+        for member in OperatingMode:
+            if normalize(member.name) == norm:
+                return member
+
+        # If the provided name is numeric, try to match by value
+        if norm.isdigit():
+            try:
+                val = int(norm)
+                for member in OperatingMode:
+                    if member.value == val:
+                        return member
+            except ValueError:
+                pass
+
+        # Fallback: substring containment (rare), e.g. 'charging' -> Connected_Charging
+        for member in OperatingMode:
+            if norm in normalize(member.name):
+                return member
+
+        return OperatingMode.Unknown
+
 
 class ZaptecClient:
     access_token: Optional[str] = None

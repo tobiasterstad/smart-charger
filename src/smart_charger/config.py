@@ -13,7 +13,7 @@ class ChargerConfig(BaseModel):
     name: str
     type: ChargerType
     connected_topic: Optional[str]
-
+    status_topic: Optional[str]
 
 class VehicleConfig(BaseModel):
     id: str
@@ -42,6 +42,7 @@ class ChargerConfiguration(BaseModel):
     high_load_topic: Optional[str] = None
     high_load_threshold: Optional[float] = None
     power_consumption_topic: Optional[str] = None
+    power_production_topic: Optional[str] = None
 
     @staticmethod
     def load_defaults():
@@ -53,15 +54,45 @@ class ChargerConfiguration(BaseModel):
             tariff=TariffConfig(topic="terstad/energy/tariff")
         )
         config.chargers = [
-            ChargerConfig(id="ctek_charger_1", name="Ctek Charger", type=ChargerType.CTEK, connected_topic="terstad/smartcharger/chargers/ctek/connected"),
-            ChargerConfig(id="GPN018087", name="Zaptec Charger", type=ChargerType.ZAPTEC, connected_topic="terstad/smartcharger/chargers/gpn018087/connected")
+            ChargerConfig(
+                id="ctek_charger_1",
+                name="Ctek Charger",
+                type=ChargerType.CTEK,
+                connected_topic="terstad/smartcharger/chargers/ctek/connected",
+                status_topic="terstad/smartcharger/chargers/ctek/status"
+            ),
+            ChargerConfig(
+                id="GPN018087",
+                name="Zaptec Charger",
+                type=ChargerType.ZAPTEC,
+                connected_topic="terstad/smartcharger/chargers/gpn018087/connected",
+                status_topic="terstad/smartcharger/chargers/gpn018087/status"
+            ),
         ]
         config.vehicles = [
-            VehicleConfig(id="leaf", name="Nissan Leaf", capacity_kwh=40, target_soc=80, topic_prefix="terstad/vehicles", soc_topic="terstad/vehicles/leaf/soc", connected_topic="terstad/vehicles/leaf/connected"),
-            VehicleConfig(id="rav4", name="Toyota RAV4", capacity_kwh=18, target_soc=100, topic_prefix="terstad/vehicles", soc_topic="terstad/vehicles/rav4/soc", connected_topic="terstad/vehicles/rav4/connected")
+            VehicleConfig(
+                id="leaf",
+                name="Nissan Leaf",
+                capacity_kwh=40,
+                target_soc=80,
+                topic_prefix="terstad/vehicles",
+                soc_topic="terstad/vehicles/leaf/soc",
+                connected_topic="terstad/vehicles/leaf/connected",
+
+            ),
+            VehicleConfig(
+                id="rav4",
+                name="Toyota RAV4",
+                capacity_kwh=18,
+                target_soc=100,
+                topic_prefix="terstad/vehicles",
+                soc_topic="terstad/vehicles/rav4/soc",
+                connected_topic="terstad/vehicles/rav4/connected",
+            ),
         ]
         config.high_load_topic = "terstad/energy/high_load"
         config.power_consumption_topic = "terstad/energy/consumption"
+        config.power_production_topic = "terstad/energy/production"
         return config
 
     def get_vehicle_config_by_id(self, vehicle_id: str) -> Optional[VehicleConfig]:

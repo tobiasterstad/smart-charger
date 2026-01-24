@@ -178,7 +178,7 @@ class TibberCostPerHour:
         response = requests.post(url, json={"query": query, "variables": variables}, headers=headers).json()
         nodes = response["data"]["viewer"]["homes"][0]["consumption"]["nodes"]
 
-        consumption = TibberConsumptionResponse.parse_obj(response["data"]["viewer"]["homes"][0]["consumption"])
+        consumption = TibberConsumptionResponse.model_validate(response["data"]["viewer"]["homes"][0]["consumption"])
         return consumption
 
     def _get_hourly_consumption(self, previous_page: str = None) -> TibberConsumptionResponse:
@@ -211,7 +211,7 @@ class TibberCostPerHour:
         response = requests.post(url, json={"query": query, "variables": variables}, headers=headers).json()
         nodes = response["data"]["viewer"]["homes"][0]["consumption"]["nodes"]
 
-        consumption = TibberConsumptionResponse.parse_obj(response["data"]["viewer"]["homes"][0]["consumption"])
+        consumption = TibberConsumptionResponse.model_validate(response["data"]["viewer"]["homes"][0]["consumption"])
         return consumption
 
 

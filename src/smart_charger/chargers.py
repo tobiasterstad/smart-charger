@@ -1,5 +1,6 @@
 import abc
 import logging
+from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Optional
 from pydantic import BaseModel, PrivateAttr
@@ -36,6 +37,16 @@ class BaseCharger(abc.ABC, BaseModel):
 
     @abc.abstractmethod
     def get_status(self) -> OperatingMode:
+        raise NotImplementedError
+
+    @staticmethod
+    @abc.abstractmethod
+    def get_connected_from_status(status: str):
+        raise NotImplementedError
+
+    @staticmethod
+    @abc.abstractmethod
+    def get_charging_from_status(status: str):
         raise NotImplementedError
 
 
@@ -110,8 +121,29 @@ class ZaptecCharger(BaseCharger):
         op_mode = details.operating_mode
         return OperatingMode(op_mode)
 
+    @staticmethod
+    def get_connected_from_status(status: str):
+        operating_mode = OperatingMode.from_name(status)
+        return operating_mode in [
+            OperatingMode.Connected_Requesting,
+            OperatingMode.Connected_Charging,
+            OperatingMode.Connected_Finished
+        ]
+
+    @staticmethod
+    def get_charging_from_status(status: str):
+        operating_mode = OperatingMode.from_name(status)
+        return operating_mode == OperatingMode.Connected_Charging
+
 
 class CtekCharger(BaseCharger):
+    @staticmethod
+    def get_connected_from_status(status: str):
+        pass
+
+    def get_charging_from_status(self, status: str):
+        pass
+
     def get_status(self) -> OperatingMode:
         pass
 
