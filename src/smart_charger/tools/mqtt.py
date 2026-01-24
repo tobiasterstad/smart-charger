@@ -26,22 +26,27 @@ def main():
     logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', level=logging.INFO)
 
     parser = ArgumentParser()
-    parser.add_argument("--connect-vehicle", type=str, help="Connect to vehicle")
+    parser.add_argument("--connect-vehicle", type=str, help="Connect to vehicle, <vehicle>:true/false")
     parser.add_argument("--connect-charger", type=str, help="Connect charger")
-    parser.add_argument("--vehicle", type=str, help="Vehicle id", default="leaf")
-    parser.add_argument("--charger", type=str, help="Charger id", default="gpn018087")
+    parser.add_argument("--update-soc", type=str, help="Update SOC for vehicle, <vehicle>:<SOC>")
     args = parser.parse_args()
 
     client = connect_mqtt()
 
     if args.connect_charger:
-        value = "true" if args.connect_charger == "true" else "false"
+        charger = args.connect_charger.split(":")[0]
+        value = args.connect_charger.split(":")[1]
         logger.info(f"Publishing charger connected {value}")
-        client.publish(f"terstad/smartcharger/chargers/{args.charger}/connected", value)
+        client.publish(f"terstad/smartcharger/chargers/{charger}/connected", value)
     elif args.connect_vehicle:
-        value = "true" if args.connect_vehicle == "true" else "false"
+        vehicle = args.connect_vehicle.split(":")[0]
+        value = args.connect_vehicle.split(":")[1]
         logger.info(f"Publishing vehicle connected {value}")
-        client.publish(f"terstad/vehicles/{args.vehicle}/connected", value)
+        client.publish(f"terstad/vehicles/{vehicle}/connected", value)
+    elif args.update_soc:
+        vehicle = args.update_soc.split(":")[0]
+        soc = args.update_soc.split(":")[1]
+        client.publish(f"terstad/vehicles/{vehicle}/soc", soc)
 
 
     print("main() called")

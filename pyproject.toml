@@ -1,29 +1,42 @@
-[tool.poetry]
+[project]
 name = "smart_charger"
 version = "2.0.0"
 description = ""
-authors = ["Tobias Terstad <tobias.terstad@astrazeneca.com>"]
+authors = [{ name = "Tobias Terstad", email = "tobias.terstad@astrazeneca.com" }]
+requires-python = ">=3.13.0"
 readme = "README.md"
-packages = [
-    { include = "smart_charger", from = "src" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
-include = ["settings.yaml"]
+dependencies = [
+    "pydantic>=2.12.5,<3",
+    "pyyaml>=6.0.3,<7",
+    "click>=8.3.1,<9",
+    "requests>=2.32.5,<3",
+    "paho-mqtt>=2.1.0,<3",
+]
 
-[tool.poetry.dependencies]
-python = "^3.13"
-pydantic = "^2.12.5"
-pyyaml = "^6.0.3"
-click = "^8.3.1"
-requests = "^2.32.5"
-paho-mqtt = "^2.1.0"
+[project.scripts]
+mqtt-tool = "smart_charger.tools.mqtt:main"
+smart-charger = "smart_charger.smartcharger:main"
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^7.4.0"
+[dependency-groups]
+dev = ["pytest>=7.4.0,<8"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/smart_charger"]
+
+[tool.hatch.build.targets.sdist.force-include]
+"settings.yaml" = "settings.yaml"
+
+[tool.hatch.build.targets.wheel]
+include = ["src/smart_charger"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/smart_charger" = "smart_charger"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.scripts]
-mqtt-tool = "tools.mqtt:main"
-smart-charger = "smart_charger.smartcharger:main"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
