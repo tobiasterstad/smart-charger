@@ -7,7 +7,7 @@ implements `price_at(datetime) -> float` and is test-friendly.
 """
 from __future__ import annotations
 
-from typing import Optional, Any, Dict
+from typing import Optional, Dict
 import datetime
 from datetime import datetime
 

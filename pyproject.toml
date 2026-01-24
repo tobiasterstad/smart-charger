@@ -18,12 +18,17 @@ dependencies = [
     "paho-mqtt>=2.1.0,<3",
 ]
 
+[tool.ruff]
+lint.extend-select = ["PTH"]
+
 [project.scripts]
 mqtt-tool = "smart_charger.tools.mqtt:main"
 smart-charger = "smart_charger.smartcharger:main"
 
 [dependency-groups]
-dev = ["pytest>=7.4.0,<8"]
+dev = [
+    "pytest>=9.0.2,<9.1",
+]
 
 [tool.hatch.build.targets.sdist]
 include = ["src/smart_charger"]

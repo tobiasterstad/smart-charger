@@ -220,7 +220,7 @@ class SmartCharger:
 
     def run_async(self):
         """Start MQTT in background and run the asyncio monitor loop (blocking call)."""
-        logger.info(f"Running SmartCharger")
+        logger.info("Running SmartCharger")
 
         # Start the message listener
         self.message_listener.start()

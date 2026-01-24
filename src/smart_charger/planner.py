@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from smart_charger.config import ChargerConfiguration, VehicleConfig
 from smart_charger.tibber.tibber_util import TibberPrices
 from smart_charger.vehicle import VehicleStatus
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ def get_now() -> datetime.datetime:
 class ChargingStep(BaseModel):
     id: str
     start_time: datetime.datetime
-    stop_time: datetime.datetime
+    stop_time: Optional[datetime.datetime] = None
     current: int = Field(default=16, description="Charging current in Amperes")
     description: str
     solar_priority: bool = False
@@ -150,7 +151,7 @@ class HourlyPlanner(BasePlanner):
                 start_time=self._get_timestamp_from_hour("00:00") + datetime.timedelta(hours=7-planned_charge_hours),
                 stop_time=self._get_timestamp_from_hour("07:00"),
                 current=16,
-                description=f"Nightly full charge"
+                description="Nightly full charge"
             ))
         elif planned_charge_hours > 7:
             plan.steps.append(ChargingStep(
@@ -158,7 +159,7 @@ class HourlyPlanner(BasePlanner):
                 start_time=self._get_timestamp_from_hour("00:00") + datetime.timedelta(days=1),
                 stop_time=self._get_timestamp_from_hour("07:00") + datetime.timedelta(days=1),
                 current=16,
-                description=f"Nightly full charge"
+                description="Nightly full charge"
             ))
 
             rest = planned_energy_kwh - plan.total_energy_kwh
@@ -168,7 +169,7 @@ class HourlyPlanner(BasePlanner):
                 start_time=self._get_timestamp_from_hour("00:00") - datetime.timedelta(hours=remaining_hours),
                 stop_time=self._get_timestamp_from_hour("00:00") + datetime.timedelta(days=1),
                 current=6,
-                description=f"Evening charge"
+                description="Evening charge"
             ))
 
         return plan
@@ -204,7 +205,7 @@ class BasicPlanner(BasePlanner):
                     start_time=self._get_timestamp_from_hour("20:27"),
                     stop_time=self._get_timestamp_from_hour("23:13"),
                     current=6,
-                    description=f"Evening charge"
+                    description="Evening charge"
                 ),
                 ChargingStep(
                     id=str(uuid.uuid4()),
@@ -218,7 +219,7 @@ class BasicPlanner(BasePlanner):
                     start_time=self._get_timestamp_from_hour("00:00", 1),
                     stop_time=self._get_timestamp_from_hour("06:00", 1),
                     current=10,
-                    description=f"Nightly charge"
+                    description="Nightly charge"
                 )
             ]
         )

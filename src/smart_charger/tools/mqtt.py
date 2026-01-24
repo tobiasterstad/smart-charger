@@ -27,7 +27,7 @@ def main():
 
     parser = ArgumentParser()
     parser.add_argument("--connect-vehicle", type=str, help="Connect to vehicle, <vehicle>:true/false")
-    parser.add_argument("--connect-charger", type=str, help="Connect charger")
+    parser.add_argument("--connect-charger", type=str, help="Connect charger, <charger>:true/false")
     parser.add_argument("--update-soc", type=str, help="Update SOC for vehicle, <vehicle>:<SOC>")
     args = parser.parse_args()
 
