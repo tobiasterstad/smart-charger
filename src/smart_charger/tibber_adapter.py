@@ -11,7 +11,7 @@ from typing import Optional, Dict
 import datetime
 
 from smart_charger.planner import TariffProvider
-from smart_charger.tibber.tibber_util import TibberPrices
+from smart_charger.tibber.tibber_util import TibberPrices, Prices, PriceInfo
 from smart_charger.tibber.tariff import TariffCalculator
 
 
@@ -82,76 +82,21 @@ class TibberPricesAdapter(TariffProvider):
     - If still not found, returns `fallback_price`.
     """
 
-    def __init__(self, tibber_prices: TibberPrices, fallback_price: float = 0.0):
+    def __init__(self, tibber_prices: Prices, fallback_price: float = 0.0):
         self.tibber = tibber_prices
         self.fallback_price = fallback_price
-        self._hourly_map: Dict[datetime, float] = {}
-        self._fetched = False
-
-    def _build_map_from_prices(self, prices_obj: any) -> None:
-        # prices_obj is expected to have attributes `today` and `tomorrow` which are
-        # iterable of dict-like or pydantic models with fields `startsAt`/`starts_at` and `total`.
-        self._hourly_map = {}
-
-        def ingest_list(lst):
-            if not lst:
-                return
-            for item in lst:
-                # item may be a dict or pydantic model
-                starts = None
-                total = None
-                if isinstance(item, dict):
-                    starts = item.get('startsAt') or item.get('starts_at') or item.get('from')
-                    total = item.get('total') or item.get('price') or item.get('energy')
-                else:
-                    # try attribute access
-                    starts = getattr(item, 'startsAt', None) or getattr(item, 'starts_at', None) or getattr(item, 'from_', None) or getattr(item, 'time', None)
-                    total = getattr(item, 'total', None) or getattr(item, 'price', None) or getattr(item, 'energy', None) or getattr(item, 'consumption', None)
-
-                if starts is None or total is None:
-                    continue
-
-                # parse starts into datetime if it's a string
-                if isinstance(starts, str):
-                    try:
-                        dt = datetime.datetime.fromisoformat(starts.replace('Z', '+00:00'))
-                    except Exception:
-                        try:
-                            dt = datetime.datetime.fromisoformat(starts)
-                        except Exception:
-                            continue
-                elif isinstance(starts, datetime.datetime):
-                    dt = starts
-                else:
-                    continue
-
-                # normalize to hour start
-                dt_hour = dt.replace(minute=0, second=0, microsecond=0)
-                try:
-                    price = float(total)
-                except Exception:
-                    continue
-
-                self._hourly_map[dt_hour] = price
-
-        ingest_list(getattr(prices_obj, 'today', None) or getattr(prices_obj, 'today', None))
-        ingest_list(getattr(prices_obj, 'tomorrow', None) or getattr(prices_obj, 'tomorrow', None))
-
-    def _ensure_map(self, refresh: bool = False):
-        if self._fetched and not refresh:
-            return
-        prices_obj = self.tibber.today_tomorrow()
-        self._build_map_from_prices(prices_obj)
-        self._fetched = True
+        self.prices: list[PriceInfo] = []
+        for home in self.tibber.data.viewer.homes:
+            for p in home.currentSubscription.priceInfo.today:
+                self.prices.append(p)
+            for p in home.currentSubscription.priceInfo.tomorrow:
+                self.prices.append(p)
 
     def price_at(self, dt: datetime.datetime) -> float:
-        # normalize to hour
         dt_hour = dt.replace(minute=0, second=0, microsecond=0)
-        # ensure we have a map
-        self._ensure_map()
-        price = self._hourly_map.get(dt_hour)
-        if price is not None:
-            return price
-        # try refreshing once
-        self._ensure_map(refresh=True)
-        return self._hourly_map.get(dt_hour, self.fallback_price)
+        for p in self.prices:
+            if p.startsAt.day == dt_hour.day and p.startsAt.hour == dt_hour.hour:
+                return p.total
+        return self.fallback_price
+
+

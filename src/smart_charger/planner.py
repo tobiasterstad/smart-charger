@@ -370,7 +370,8 @@ class PriceAwarePlanner(BasePlanner):
         elif tibber_prices is not None:
             # local import to avoid circular dependency
             from smart_charger.tibber_adapter import TibberPricesAdapter
-            self.tariff_provider = TibberPricesAdapter(tibber_prices, fallback_price=fallback_price)
+            prices_today_tomorrow = tibber_prices.today_tomorrow()
+            self.tariff_provider = TibberPricesAdapter(prices_today_tomorrow, fallback_price=fallback_price)
         else:
             self.tariff_provider = None
 

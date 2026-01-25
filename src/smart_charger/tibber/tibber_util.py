@@ -80,7 +80,7 @@ class TibberPrices:
             "Content-Type": "application/json"
         }
 
-    def today_tomorrow(self):
+    def today_tomorrow(self) -> Prices:
         payload = {"query": "{viewer {homes {currentSubscription {priceInfo {today {total energy tax startsAt level } tomorrow { total energy tax startsAt level} } } } }}"}
         response = requests.request("POST", self.url, json=payload, headers=self.headers)
         if response.status_code != 200:
