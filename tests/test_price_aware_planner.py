@@ -31,14 +31,20 @@ class TestPriceAwarePlanner(unittest.TestCase):
 
     def set_now(self, fixed_dt: datetime.datetime):
         # Patch planner.get_now to return fixed_dt
-        p = __import__('unittest.mock').mock.patch.object(planner, 'get_now', lambda: fixed_dt)
+        p = __import__("unittest.mock").mock.patch.object(
+            planner, "get_now", lambda: fixed_dt
+        )
         p.start()
         self._patchers.append(p)
 
-
-    def _count_hours_in_steps(self, steps: List[planner.ChargingStep], current: int) -> float:
-        return sum((s.stop_time - s.start_time).total_seconds() / 3600 for s in steps if s.current == current)
-
+    def _count_hours_in_steps(
+        self, steps: List[planner.ChargingStep], current: int
+    ) -> float:
+        return sum(
+            (s.stop_time - s.start_time).total_seconds() / 3600
+            for s in steps
+            if s.current == current
+        )
 
     def test_price_aware_picks_night_hours_when_cheaper(self):
         # now = 2026-01-22 18:30
@@ -50,7 +56,7 @@ class TestPriceAwarePlanner(unittest.TestCase):
         provider = SimpleTariffProvider(list(range(0, 7)))
         planner_obj = planner.PriceAwarePlanner(config, tariff_provider=provider)
 
-        vehicle = planner.VehicleStatus(id='leaf', soc=50)
+        vehicle = planner.VehicleStatus(id="leaf", soc=50)
         plan = planner_obj.plan_charging(vehicle)
 
         # Ensure planner produced some hours and that total energy meets or exceeds the requested
@@ -72,7 +78,6 @@ class TestPriceAwarePlanner(unittest.TestCase):
         # With cheap night prices, the planner should prefer night hours (at least as many as day hours)
         assert night_hours >= day_hours
 
-
     def test_price_aware_groups_adjacent_hours(self):
         # now = 2026-01-22 21:10 -> start hour 22:00
         fixed_dt = datetime.datetime(2026, 1, 22, 21, 10)
@@ -84,7 +89,7 @@ class TestPriceAwarePlanner(unittest.TestCase):
         planner_obj = planner.PriceAwarePlanner(config, tariff_provider=provider)
 
         # Vehicle needs around 4 hours (as in previous test)
-        vehicle = planner.VehicleStatus(id='leaf', soc=50)
+        vehicle = planner.VehicleStatus(id="leaf", soc=50)
         plan = planner_obj.plan_charging(vehicle)
 
         # All chosen hours should be among the cheap set; and because they are consecutive
@@ -101,7 +106,6 @@ class TestPriceAwarePlanner(unittest.TestCase):
                 assert cursor.hour in provider.cheap_hours
                 cursor += datetime.timedelta(hours=1)
 
-
     def test_price_aware_fallback_no_provider(self):
         # When tariff provider is None, PriceAwarePlanner should still return a plan and
         # prefer night hours (tiny night bias) — ensure energy coverage
@@ -111,34 +115,43 @@ class TestPriceAwarePlanner(unittest.TestCase):
         config = ChargerConfiguration.load_defaults()
         planner_obj = planner.PriceAwarePlanner(config, tariff_provider=None)
 
-        vehicle = planner.VehicleStatus(id='leaf', soc=50)
+        vehicle = planner.VehicleStatus(id="leaf", soc=50)
         plan = planner_obj.plan_charging(vehicle)
 
         assert plan.charge_hours > 0
         assert plan.total_energy_kwh >= plan.energy_kwh
 
-
     def test_price_aware_not_enough_hours(self):
         # If there are fewer candidate hours than required, planner should schedule all candidates
         # Choose now late so only small number of candidate hours are available
-        fixed_dt = datetime.datetime(2026, 1, 23, 6, 30)  # only 0.5h until 07:00 -> start_hour = 7:00 -> zero candidates before night_end
+        fixed_dt = datetime.datetime(
+            2026, 1, 23, 6, 30
+        )  # only 0.5h until 07:00 -> start_hour = 7:00 -> zero candidates before night_end
         self.set_now(fixed_dt)
 
         config = ChargerConfiguration.load_defaults()
         provider = SimpleTariffProvider([0, 1, 2, 3, 4, 5, 6])
         planner_obj = planner.PriceAwarePlanner(config, tariff_provider=provider)
 
-        vehicle = planner.VehicleStatus(id='leaf', soc=0)  # large demand
+        vehicle = planner.VehicleStatus(id="leaf", soc=0)  # large demand
         plan = planner_obj.plan_charging(vehicle)
 
         # compute expected candidate count using same logic as planner
         now = planner.get_now()
         if now.hour < 7:
-            night_start = planner.BasePlanner._get_timestamp_from_hour("00:00", increment_days=0)
-            night_end = planner.BasePlanner._get_timestamp_from_hour("07:00", increment_days=0)
+            night_start = planner.BasePlanner._get_timestamp_from_hour(
+                "00:00", increment_days=0
+            )
+            night_end = planner.BasePlanner._get_timestamp_from_hour(
+                "07:00", increment_days=0
+            )
         else:
-            night_start = planner.BasePlanner._get_timestamp_from_hour("00:00", increment_days=1)
-            night_end = planner.BasePlanner._get_timestamp_from_hour("07:00", increment_days=1)
+            night_start = planner.BasePlanner._get_timestamp_from_hour(
+                "00:00", increment_days=1
+            )
+            night_end = planner.BasePlanner._get_timestamp_from_hour(
+                "07:00", increment_days=1
+            )
 
         start_hour = now.replace(minute=0, second=0, microsecond=0)
         if now.minute > 0 or now.second > 0 or now.microsecond > 0:

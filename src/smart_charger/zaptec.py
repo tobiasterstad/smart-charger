@@ -13,6 +13,7 @@ class TokenResponse(BaseModel):
     scope: Optional[str] = None
     refresh_token: Optional[str] = None
 
+
 # Installation
 class Installation(BaseModel):
     Id: str
@@ -69,6 +70,7 @@ class ChargerCommands(enum.Enum):
     START = 507
     DEAUTH = 10001
 
+
 class ChargerState(BaseModel):
     charger_id: str = Field(alias="chargerId")
     state_id: int = Field(alias="stateId")
@@ -76,8 +78,10 @@ class ChargerState(BaseModel):
     timestamp: datetime.datetime = Field(alias="timestamp")
     value: Optional[str] = Field(alias="valueAsString")
 
+
 class ChargerStateResponse(BaseModel):
     states: list[ChargerState] = Field(alias="")
+
 
 class ChargerDetail(BaseModel):
     id: str = Field(alias="Id")
@@ -114,7 +118,7 @@ class OperatingMode(enum.Enum):
             return OperatingMode.Unknown
 
         def normalize(s: str) -> str:
-            return ''.join(ch for ch in s.lower() if ch.isalnum())
+            return "".join(ch for ch in s.lower() if ch.isalnum())
 
         norm = normalize(name)
 
@@ -158,12 +162,12 @@ class ZaptecClient:
 
     @staticmethod
     def _get_access_token(
-            username: str,
-            password: str,
-            token_url: str = "https://api.zaptec.com/oauth/token",
-            client_id: Optional[str] = None,
-            client_secret: Optional[str] = None,
-            timeout: int = 10,
+        username: str,
+        password: str,
+        token_url: str = "https://api.zaptec.com/oauth/token",
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        timeout: int = 10,
     ) -> TokenResponse:
         """Request an OAuth token using the Resource Owner Password Credentials grant.
 
@@ -184,7 +188,9 @@ class ZaptecClient:
             ValueError: If required credentials are missing.
         """
         if not username or not password:
-            raise ValueError("username and password are required to obtain an access token")
+            raise ValueError(
+                "username and password are required to obtain an access token"
+            )
 
         # build the form body
         data = {
@@ -208,61 +214,82 @@ class ZaptecClient:
 
     def get_installations(self):
         url = "https://api.zaptec.com/api/installation"
-        headers = {"accept": "application/json", "Authorization": f"Bearer {self.access_token}"}
+        headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {self.access_token}",
+        }
         response = requests.get(url, headers=headers)
         return Installations.model_validate_json(response.text)
 
-    def update_installation(self, installation_id: str, available_current: float) -> None:
+    def update_installation(
+        self, installation_id: str, available_current: float
+    ) -> None:
         url = f"https://api.zaptec.com/api/installation/{installation_id}/update"
         headers = {
             "accept": "application/json",
             "content-type": "application/*+json",
-            "Authorization": f"Bearer {self.access_token}"
+            "Authorization": f"Bearer {self.access_token}",
         }
         body = {
             "AvailableCurrent": available_current,
         }
         response = requests.post(url, json=body, headers=headers)
         if response.status_code != 200:
-            raise Exception(f"Failed to update installation: {response.status_code} {response.text}")
+            raise Exception(
+                f"Failed to update installation: {response.status_code} {response.text}"
+            )
 
     def get_charger_details(self, charger_id: str) -> ChargerDetail:
         url = f"https://api.zaptec.com/api/chargers/{charger_id}"
-        headers = {"accept": "application/json", "Authorization": f"Bearer {self.access_token}"}
+        headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {self.access_token}",
+        }
         response = requests.get(url, headers=headers)
         response_text = response.text
         if response.status_code != 200:
-            raise Exception(f"Failed to get charger details: {response.status_code} {response_text}")
+            raise Exception(
+                f"Failed to get charger details: {response.status_code} {response_text}"
+            )
         return ChargerDetail.model_validate_json(response_text)
 
     def get_charger_state(self, charger_id: str) -> ChargerStateResponse:
         url = f"https://api.zaptec.com/api/chargers/{charger_id}/state"
-        headers = {"accept": "application/json", "Authorization": f"Bearer {self.access_token}"}
+        headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {self.access_token}",
+        }
         response = requests.get(url, headers=headers)
         response_text = response.text
         if response.status_code != 200:
-            raise Exception(f"Failed to get charger details: {response.status_code} {response_text}")
+            raise Exception(
+                f"Failed to get charger details: {response.status_code} {response_text}"
+            )
         return ChargerStateResponse.model_validate_json(response_text)
 
     def update_charger(self, charger_id: str, max_current: float) -> None:
         url = f"https://api.zaptec.com/api/chargers/{charger_id}/update"
         headers = {
             "content-type": "application/*+json",
-            "Authorization": f"Bearer {self.access_token}"
+            "Authorization": f"Bearer {self.access_token}",
         }
-        body = {
-            "maxChargeCurrent": max_current
-        }
+        body = {"maxChargeCurrent": max_current}
         response = requests.post(url, json=body, headers=headers)
         if response.status_code != 200:
-            raise Exception(f"Failed to update charger: {response.status_code} {response.text}")
+            raise Exception(
+                f"Failed to update charger: {response.status_code} {response.text}"
+            )
 
-    def send_charger_command(self, charger_id: str, command_id: ChargerCommands) -> None:
+    def send_charger_command(
+        self, charger_id: str, command_id: ChargerCommands
+    ) -> None:
         url = f"https://api.zaptec.com/api/chargers/{charger_id}/sendCommand/{command_id.value}"
         headers = {
             "content-type": "application/*+json",
-            "Authorization": f"Bearer {self.access_token}"
+            "Authorization": f"Bearer {self.access_token}",
         }
         response = requests.post(url, headers=headers)
         if response.status_code != 200:
-            raise Exception(f"Failed to update charger: {response.status_code} {response.text}")
+            raise Exception(
+                f"Failed to update charger: {response.status_code} {response.text}"
+            )

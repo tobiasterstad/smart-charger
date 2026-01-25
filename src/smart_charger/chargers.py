@@ -83,7 +83,9 @@ class ZaptecCharger(BaseCharger):
             self._client = ZaptecClient()
 
         # authenticate; ZaptecClient should raise on auth failure
-        self._client.authenticate(username=self.settings.username, password=self.settings.password)
+        self._client.authenticate(
+            username=self.settings.username, password=self.settings.password
+        )
 
     def charger_type(self) -> ChargerType:
         return ChargerType.ZAPTEC
@@ -95,7 +97,10 @@ class ZaptecCharger(BaseCharger):
         # use the client if available; tolerate missing client for tests/mocks
         if self._client is not None:
             try:
-                self._client.update_installation(installation_id=self.settings.installation_id, available_current=current)
+                self._client.update_installation(
+                    installation_id=self.settings.installation_id,
+                    available_current=current,
+                )
             except Exception:
                 logger.exception("Failed to update Zaptec installation current")
 
@@ -103,7 +108,9 @@ class ZaptecCharger(BaseCharger):
         super().start_charging()
         logger.info(f"Starting Zaptec charger ID: {self.id}")
         try:
-            self._client.send_charger_command(charger_id=self.settings.charger_id, command_id=ChargerCommands.START)
+            self._client.send_charger_command(
+                charger_id=self.settings.charger_id, command_id=ChargerCommands.START
+            )
         except Exception as e:
             logger.exception("Failed to start charging", e)
 
@@ -111,7 +118,9 @@ class ZaptecCharger(BaseCharger):
         super().stop_charging()
         logger.info(f"Stopping Zaptec charger ID: {self.id}")
         try:
-            self._client.send_charger_command(charger_id=self.settings.charger_id, command_id=ChargerCommands.STOP)
+            self._client.send_charger_command(
+                charger_id=self.settings.charger_id, command_id=ChargerCommands.STOP
+            )
         except Exception as e:
             logger.exception("Failed to start charging", e)
 
@@ -126,7 +135,7 @@ class ZaptecCharger(BaseCharger):
         return operating_mode in [
             OperatingMode.Connected_Requesting,
             OperatingMode.Connected_Charging,
-            OperatingMode.Connected_Finished
+            OperatingMode.Connected_Finished,
         ]
 
     @staticmethod
@@ -160,4 +169,3 @@ class CtekCharger(BaseCharger):
 
     def stop_charging(self):
         logger.info("Stopping CTEK charger")
-

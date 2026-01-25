@@ -5,13 +5,14 @@ TariffCalculator (from `smart_charger.tibber.tariff`) or a plain mapping of
 timestamps->prices (the latter is passed into TariffCalculator). The adapter
 implements `price_at(datetime) -> float` and is test-friendly.
 """
+
 from __future__ import annotations
 
-from typing import Optional, Dict
+from typing import Optional
 import datetime
 
 from smart_charger.planner import TariffProvider
-from smart_charger.tibber.tibber_util import TibberPrices, Prices, PriceInfo
+from smart_charger.tibber.tibber_util import Prices, PriceInfo
 from smart_charger.tibber.tariff import TariffCalculator
 
 
@@ -31,7 +32,12 @@ class TibberAdapter(TariffProvider):
     operate in offline/test environments.
     """
 
-    def __init__(self, tariff_calculator: Optional[TariffCalculator] = None, tariff_data: Optional[dict] = None, fallback_price: float = 0.0):
+    def __init__(
+        self,
+        tariff_calculator: Optional[TariffCalculator] = None,
+        tariff_data: Optional[dict] = None,
+        fallback_price: float = 0.0,
+    ):
         if tariff_calculator is not None:
             self.calc = tariff_calculator
         elif tariff_data is not None:
@@ -98,5 +104,3 @@ class TibberPricesAdapter(TariffProvider):
             if p.startsAt.day == dt_hour.day and p.startsAt.hour == dt_hour.hour:
                 return p.total
         return self.fallback_price
-
-

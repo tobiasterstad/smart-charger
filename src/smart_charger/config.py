@@ -3,6 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+
 class ChargerType(enum.Enum):
     CTEK = "ctek"
     ZAPTEC = "zaptec"
@@ -15,6 +16,7 @@ class ChargerConfig(BaseModel):
     connected_topic: Optional[str]
     status_topic: Optional[str]
 
+
 class VehicleConfig(BaseModel):
     id: str
     name: str
@@ -25,12 +27,14 @@ class VehicleConfig(BaseModel):
     enabled: bool = True
     topic_prefix: str = None
 
+
 class TariffConfig(BaseModel):
     topic: str
     model: str = "3-peeks"
     months: list[int] = [1, 2, 3, 10, 11, 12]
     days: list[int] = [0, 1, 2, 3, 4, 5, 6]  # 0=Monday, 6=Sunday
     hours: list[int] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+
 
 class ChargerConfiguration(BaseModel):
     mqtt_broker: str
@@ -51,7 +55,7 @@ class ChargerConfiguration(BaseModel):
             mqtt_port=1883,
             smart_charger_topic_prefix="terstad/smartcharger",
             high_load_threshold=4000,
-            tariff=TariffConfig(topic="terstad/energy/tariff")
+            tariff=TariffConfig(topic="terstad/energy/tariff"),
         )
         config.chargers = [
             ChargerConfig(
@@ -59,14 +63,14 @@ class ChargerConfiguration(BaseModel):
                 name="Ctek Charger",
                 type=ChargerType.CTEK,
                 connected_topic="terstad/smartcharger/chargers/ctek/connected",
-                status_topic="terstad/smartcharger/chargers/ctek/status"
+                status_topic="terstad/smartcharger/chargers/ctek/status",
             ),
             ChargerConfig(
                 id="GPN018087",
                 name="Zaptec Charger",
                 type=ChargerType.ZAPTEC,
                 connected_topic="terstad/smartcharger/chargers/gpn018087/connected",
-                status_topic="terstad/smartcharger/chargers/gpn018087/status"
+                status_topic="terstad/smartcharger/chargers/gpn018087/status",
             ),
         ]
         config.vehicles = [
@@ -78,7 +82,6 @@ class ChargerConfiguration(BaseModel):
                 topic_prefix="terstad/vehicles",
                 soc_topic="terstad/vehicles/leaf/soc",
                 connected_topic="terstad/vehicles/leaf/connected",
-
             ),
             VehicleConfig(
                 id="rav4",

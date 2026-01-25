@@ -13,8 +13,10 @@ from smart_charger.planner import ChargingPlan, VehicleStatus
 
 logger = logging.getLogger(__name__)
 
+
 class ChargingSessionStatus(enum.Enum):
     PARTIAL = "partial"
+
 
 class ChargingSession(BaseModel):
     id: str
@@ -45,21 +47,31 @@ class SessionManager:
         self._on_start_listeners: List[Callable[[ChargingSession], None]] = []
         self._on_stop_listeners: List[Callable[[ChargingSession], None]] = []
 
-    def add_on_session_start_listener(self, callback: Callable[[ChargingSession], None]) -> None:
+    def add_on_session_start_listener(
+        self, callback: Callable[[ChargingSession], None]
+    ) -> None:
         self._on_start_listeners.append(callback)
 
-    def add_on_session_stop_listener(self, callback: Callable[[ChargingSession], None]) -> None:
+    def add_on_session_stop_listener(
+        self, callback: Callable[[ChargingSession], None]
+    ) -> None:
         self._on_stop_listeners.append(callback)
 
-    def get_charger(self, vehicle_id: str, chargers: list[BaseCharger]) -> Optional[BaseCharger]:
+    def get_charger(
+        self, vehicle_id: str, chargers: list[BaseCharger]
+    ) -> Optional[BaseCharger]:
         session = self.get_session_by_vehicle(vehicle_id, join=False)
         if session:
-            logger.debug("Vehicle %s is connected to charger %s", vehicle_id, session.charger.id)
+            logger.debug(
+                "Vehicle %s is connected to charger %s", vehicle_id, session.charger.id
+            )
             charger = self.get_charger_status_by_id(chargers, session.charger.id)
             return charger
         return None
 
-    def get_session_by_vehicle(self, vehicle_id: str, join = True) -> Optional[ChargingSession]:
+    def get_session_by_vehicle(
+        self, vehicle_id: str, join=True
+    ) -> Optional[ChargingSession]:
         for session in self.current_sessions:
             if session.vehicle and session.vehicle.id == vehicle_id:
                 return session
@@ -67,12 +79,18 @@ class SessionManager:
         if join:
             for session in self.current_sessions:
                 if session.vehicle is None:
-                    logger.info("Joining vehicle %s to existing session with charger %s", vehicle_id, session.charger.id)
+                    logger.info(
+                        "Joining vehicle %s to existing session with charger %s",
+                        vehicle_id,
+                        session.charger.id,
+                    )
                     return session
 
         return None
 
-    def get_session_by_charger(self, charger_id: str, join=True) -> Optional[ChargingSession]:
+    def get_session_by_charger(
+        self, charger_id: str, join=True
+    ) -> Optional[ChargingSession]:
         for session in self.current_sessions:
             if session.charger and session.charger.id == charger_id:
                 return session
@@ -80,7 +98,11 @@ class SessionManager:
         if join:
             for session in self.current_sessions:
                 if session.charger is None:
-                    logger.info("Joining charger %s to existing session with vehicle %s", charger_id, session.vehicle.id)
+                    logger.info(
+                        "Joining charger %s to existing session with vehicle %s",
+                        charger_id,
+                        session.vehicle.id,
+                    )
                     return session
 
         return None
@@ -90,14 +112,16 @@ class SessionManager:
         session = self.get_session_by_charger(charger.id)
         if session is None:
             if not charger.connected:
-                logger.debug("Charger %s is not connected, no session to create", charger.id)
+                logger.debug(
+                    "Charger %s is not connected, no session to create", charger.id
+                )
                 return
             else:
                 new_session = ChargingSession(
                     id=str(uuid.uuid4()),
                     vehicle=None,
                     charger=charger,
-                    start_timestamp=datetime.datetime.now()
+                    start_timestamp=datetime.datetime.now(),
                 )
                 logger.info(f"Created session: \n{session}")
                 self.current_sessions.append(new_session)
@@ -113,18 +137,23 @@ class SessionManager:
                 self._trigger_session_start(session)
 
     def connected_vehicle(self, vehicle_status: VehicleStatus) -> None:
-        logger.info(f"Vehicle {vehicle_status.id} connected: {vehicle_status.connected}")
+        logger.info(
+            f"Vehicle {vehicle_status.id} connected: {vehicle_status.connected}"
+        )
         session = self.get_session_by_vehicle(vehicle_status.id)
         if session is None:
             if not vehicle_status.connected:
-                logger.debug("Vehicle %s is not connected, no session to create", vehicle_status.id)
+                logger.debug(
+                    "Vehicle %s is not connected, no session to create",
+                    vehicle_status.id,
+                )
                 return
             else:
                 new_session = ChargingSession(
                     id=str(uuid.uuid4()),
                     vehicle=vehicle_status,
                     charger=None,
-                    start_timestamp=datetime.datetime.now()
+                    start_timestamp=datetime.datetime.now(),
                 )
                 logger.info(f"Created session: \n{new_session}")
                 self.current_sessions.append(new_session)
@@ -145,14 +174,18 @@ class SessionManager:
                 self.current_sessions.remove(session)
 
     @staticmethod
-    def get_charger_status_by_id(chargers: list[BaseCharger], charger_id: str) -> Optional[BaseCharger]:
+    def get_charger_status_by_id(
+        chargers: list[BaseCharger], charger_id: str
+    ) -> Optional[BaseCharger]:
         for charger in chargers:
             if charger.id == charger_id:
                 return charger
         return None
 
     @staticmethod
-    def get_vehicle_status_by_id(vehicle_id: str, vehicles: list[VehicleStatus]) -> Optional[VehicleStatus]:
+    def get_vehicle_status_by_id(
+        vehicle_id: str, vehicles: list[VehicleStatus]
+    ) -> Optional[VehicleStatus]:
         for vehicle in vehicles:
             if vehicle.id == vehicle_id:
                 return vehicle
@@ -173,6 +206,3 @@ class SessionManager:
                 cb(session)
             except Exception:
                 logger.exception("on_session_start listener raised an exception")
-
-
-

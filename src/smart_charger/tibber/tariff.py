@@ -12,6 +12,7 @@ class PeakHour(BaseModel):
     time: datetime
     consumption: float
 
+
 class MonthlyPeaks(BaseModel):
     month: int
     peak_hours: list[PeakHour]
@@ -20,12 +21,12 @@ class MonthlyPeaks(BaseModel):
     @computed_field
     @property
     def month_name(self) -> str:
-        return datetime(1900, self.month, 1).strftime('%B')
+        return datetime(1900, self.month, 1).strftime("%B")
 
     @computed_field
     @property
     def tariff_enabled(self) -> bool:
-        if self.month in [1,2,3,11,12]:
+        if self.month in [1, 2, 3, 11, 12]:
             return True
         return False
 
@@ -73,6 +74,7 @@ class MonthlyPeaks(BaseModel):
     def comparison_cost(self) -> float:
         return 6011 / 12 + (79.50 / 100.0) * self.total_consumption
 
+
 class PeaksResponse(BaseModel):
     monthly_peaks: list[MonthlyPeaks] = Field(alias="monthlyPeaks")
 
@@ -83,15 +85,18 @@ class TibberNode(BaseModel):
     to: datetime
     consumption: Optional[float]
 
+
 class TibberPageInfo(BaseModel):
     start_cursor: str = Field(alias="startCursor")
     end_cursor: str = Field(alias="endCursor")
     has_next_page: bool = Field(alias="hasNextPage")
     has_previous_page: bool = Field(alias="hasPreviousPage")
 
+
 class TibberConsumptionResponse(BaseModel):
     nodes: list[TibberNode]
     page_info: TibberPageInfo = Field(alias="pageInfo")
+
 
 class TibberCostPerHour:
     def __init__(self):
@@ -110,14 +115,22 @@ class TibberCostPerHour:
         grouped = defaultdict(list)
         for node in all_nodes:
             grouped[(node.from_.year, node.from_.month)].append(
-                PeakHour(time=node.from_, consumption=node.consumption if node.consumption is not None else 0.0)
+                PeakHour(
+                    time=node.from_,
+                    consumption=node.consumption
+                    if node.consumption is not None
+                    else 0.0,
+                )
             )
         monthly_peaks = [
-            MonthlyPeaks(month=year_and_month[1], peak_hours=hours.sort(key=lambda x: x.time) or hours)
+            MonthlyPeaks(
+                month=year_and_month[1],
+                peak_hours=hours.sort(key=lambda x: x.time) or hours,
+            )
             for year_and_month, hours in grouped.items()
         ]
         result = PeaksResponse(monthlyPeaks=monthly_peaks)
-        #print(json.dumps(result.model_dump(by_alias=True), indent=4, default=str))
+        # print(json.dumps(result.model_dump(by_alias=True), indent=4, default=str))
         return result
 
     def get_top_consumption_hours(self, peak_data: PeaksResponse, n=3):
@@ -128,27 +141,33 @@ class TibberCostPerHour:
             peak_hours = [
                 hour
                 for hour in month.peak_hours
-                if hour.consumption is not None
-                   and 7 <= hour.time.hour < 21
+                if hour.consumption is not None and 7 <= hour.time.hour < 21
             ]
 
-            top_hours = sorted(peak_hours, key=lambda x: x.consumption, reverse=True)[:n]
+            top_hours = sorted(peak_hours, key=lambda x: x.consumption, reverse=True)[
+                :n
+            ]
             month.peak_hours = top_hours
 
             # Beräkna total förbrukning för månaden
             month.total_consumption = 0.0
             for m in monthly_consumption.nodes:
-                if m.from_.month == month.month and m.from_.year == month.peak_hours[0].time.year:
+                if (
+                    m.from_.month == month.month
+                    and m.from_.year == month.peak_hours[0].time.year
+                ):
                     month.total_consumption = m.consumption
                     break
 
-        #top3 = sorted(nodes, key=lambda x: x["consumption"], reverse=True)[:3]
-        #for i, hour in enumerate(top3, 1):
+        # top3 = sorted(nodes, key=lambda x: x["consumption"], reverse=True)[:3]
+        # for i, hour in enumerate(top3, 1):
         #    print(f"Topp {i}: {hour['from']} - {hour['consumption']} kWh")
 
         return peak_data
 
-    def get_monthly_consumption(self, previous_page: str = None) -> TibberConsumptionResponse:
+    def get_monthly_consumption(
+        self, previous_page: str = None
+    ) -> TibberConsumptionResponse:
         url = "https://api.tibber.com/v1-beta/gql"
         headers = {"Authorization": "Bearer " + self.api_key}
 
@@ -175,13 +194,19 @@ class TibberCostPerHour:
         """
 
         variables = {"page": previous_page} if previous_page else {}
-        response = requests.post(url, json={"query": query, "variables": variables}, headers=headers).json()
+        response = requests.post(
+            url, json={"query": query, "variables": variables}, headers=headers
+        ).json()
         nodes = response["data"]["viewer"]["homes"][0]["consumption"]["nodes"]
 
-        consumption = TibberConsumptionResponse.model_validate(response["data"]["viewer"]["homes"][0]["consumption"])
+        consumption = TibberConsumptionResponse.model_validate(
+            response["data"]["viewer"]["homes"][0]["consumption"]
+        )
         return consumption
 
-    def _get_hourly_consumption(self, previous_page: str = None) -> TibberConsumptionResponse:
+    def _get_hourly_consumption(
+        self, previous_page: str = None
+    ) -> TibberConsumptionResponse:
         url = "https://api.tibber.com/v1-beta/gql"
         headers = {"Authorization": "Bearer " + self.api_key}
 
@@ -208,15 +233,18 @@ class TibberCostPerHour:
         """
 
         variables = {"page": previous_page} if previous_page else {}
-        response = requests.post(url, json={"query": query, "variables": variables}, headers=headers).json()
+        response = requests.post(
+            url, json={"query": query, "variables": variables}, headers=headers
+        ).json()
         _ = response["data"]["viewer"]["homes"][0]["consumption"]["nodes"]
 
-        consumption = TibberConsumptionResponse.model_validate(response["data"]["viewer"]["homes"][0]["consumption"])
+        consumption = TibberConsumptionResponse.model_validate(
+            response["data"]["viewer"]["homes"][0]["consumption"]
+        )
         return consumption
 
 
 class TariffCalculator:
-
     def __init__(self, tariff_data):
         self.tariff_data = tariff_data
 

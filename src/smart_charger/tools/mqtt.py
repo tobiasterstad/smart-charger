@@ -4,9 +4,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-client_id = 'smart-charger-client-mqtt'
+client_id = "smart-charger-client-mqtt"
 port = 1883
-broker = '10.100.0.10'
+broker = "10.100.0.10"
+
 
 def connect_mqtt():
     def on_connect(client, userdata, flags, rc):
@@ -22,13 +23,22 @@ def connect_mqtt():
     client.connect(broker, port)
     return client
 
+
 def main():
-    logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s', level=logging.INFO)
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO
+    )
 
     parser = ArgumentParser()
-    parser.add_argument("--connect-vehicle", type=str, help="Connect to vehicle, <vehicle>:true/false")
-    parser.add_argument("--connect-charger", type=str, help="Connect charger, <charger>:true/false")
-    parser.add_argument("--update-soc", type=str, help="Update SOC for vehicle, <vehicle>:<SOC>")
+    parser.add_argument(
+        "--connect-vehicle", type=str, help="Connect to vehicle, <vehicle>:true/false"
+    )
+    parser.add_argument(
+        "--connect-charger", type=str, help="Connect charger, <charger>:true/false"
+    )
+    parser.add_argument(
+        "--update-soc", type=str, help="Update SOC for vehicle, <vehicle>:<SOC>"
+    )
     args = parser.parse_args()
 
     client = connect_mqtt()
@@ -48,8 +58,8 @@ def main():
         soc = args.update_soc.split(":")[1]
         client.publish(f"terstad/vehicles/{vehicle}/soc", soc)
 
-
     print("main() called")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
