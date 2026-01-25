@@ -25,6 +25,7 @@ class MessageListener:
         self._on_connected_charger_listeners: list[Callable[[BaseCharger], None]] = []
         self._on_connected_vehicle_listeners: list[Callable[[VehicleStatus], None]] = []
         self._on_target_reached_listeners: list[Callable[[VehicleStatus], None]] = []
+        self._on_soc_changed_listeners: list[Callable[[VehicleStatus], None]] = []
         self._on_power_consumption_changed: list[Callable[[float], None]] = []
         self._on_power_production_changed: list[Callable[[float], None]] = []
 
@@ -36,6 +37,9 @@ class MessageListener:
 
     def add_on_target_reached_listeners(self, callback: Callable[[VehicleStatus], None]) -> None:
         self._on_target_reached_listeners.append(callback)
+
+    def add_on_soc_changed_listeners(self, callback: Callable[[VehicleStatus], None]) -> None:
+        self._on_soc_changed_listeners.append(callback)
 
     def add_on_power_consumption_updated(self, callback: Callable[[float], None]) -> None:
         self._on_power_consumption_changed.append(callback)
@@ -62,18 +66,11 @@ class MessageListener:
             logger.debug(f"Received `{msg.payload.decode()}` from `{msg.topic}` topic")
             for charger_config in self.config.chargers:
                 charger_status = SessionManager.get_charger_status_by_id(self.chargers, charger_config.id)
-                if msg.topic == charger_config.connected_topic:
-                    value = _decode_bool(msg)
-                    if charger_status.connected != value:
-                        charger_status.connected = value
-                        logger.info(f"Updated {charger_config.name} connected to {charger_status.connected}")
-                        self._trigger_listeners(self._on_connected_charger_listeners, charger_status)
-
-                elif msg.topic == charger_config.status_topic:
+                if msg.topic == charger_config.status_topic:
                     value = charger_status.get_connected_from_status(msg)
                     if charger_status.connected != value:
                         charger_status.connected = value
-                        logger.info(f"Updated {charger_config.name} connected to {charger_status.connected}")
+                        logger.debug(f"Updated {charger_config.name} connected to {charger_status.connected}")
                         self._trigger_listeners(self._on_connected_charger_listeners, charger_status)
 
             for vehicle in self.config.vehicles:
@@ -82,13 +79,14 @@ class MessageListener:
                     value = _decode_bool(msg)
                     if vehicle_status.connected != value:
                         vehicle_status.connected = value
-                        logger.info(f"Updated {vehicle.name} connected to {vehicle_status.connected}")
+                        logger.debug(f"Updated {vehicle.name} connected to {vehicle_status.connected}")
                         self._trigger_listeners(self._on_connected_vehicle_listeners, vehicle_status)
 
                 elif msg.topic == vehicle.soc_topic:
                     try:
                         vehicle_status.soc = int(msg.payload.decode())
-                        logger.info(f"Updated {vehicle.name} SOC to {vehicle_status.soc}")
+                        logger.debug(f"Updated {vehicle.name} SOC to {vehicle_status.soc}")
+                        self._trigger_listeners(self._on_soc_changed_listeners, vehicle_status)
                         if vehicle_status.soc >= vehicle.target_soc:
                             self._trigger_listeners(self._on_target_reached_listeners, vehicle_status)
 

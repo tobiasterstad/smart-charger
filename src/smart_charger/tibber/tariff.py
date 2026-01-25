@@ -209,7 +209,7 @@ class TibberCostPerHour:
 
         variables = {"page": previous_page} if previous_page else {}
         response = requests.post(url, json={"query": query, "variables": variables}, headers=headers).json()
-        nodes = response["data"]["viewer"]["homes"][0]["consumption"]["nodes"]
+        _ = response["data"]["viewer"]["homes"][0]["consumption"]["nodes"]
 
         consumption = TibberConsumptionResponse.model_validate(response["data"]["viewer"]["homes"][0]["consumption"])
         return consumption

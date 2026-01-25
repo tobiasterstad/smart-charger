@@ -66,6 +66,7 @@ class SmartCharger:
         self.message_listener.add_on_connected_charger_listener(self.session_manager.connected_charger)
         self.message_listener.add_on_connected_vehicle_listener(self.session_manager.connected_vehicle)
         self.message_listener.add_on_target_reached_listeners(self._on_target_reached)
+        self.message_listener.add_on_soc_changed_listeners(self._on_soc_changed)
         self.message_listener.add_on_power_consumption_updated(self._on_updated_power_consumption)
         self.message_listener.add_on_power_production_changed(self._on_power_production_changed)
 
@@ -131,6 +132,10 @@ class SmartCharger:
         status = session.charger.get_status()
         if status == OperatingMode.Connected_Charging:
             session.charger.stop_charging()
+
+    @staticmethod
+    def _on_soc_changed(vehicle: VehicleStatus):
+        logger.info(f"Vehicle {vehicle.id} changes SOC: {vehicle.soc}")
 
     def _on_updated_power_consumption(self, power):
         logger.debug(f"Received power consumption: {power} watts")

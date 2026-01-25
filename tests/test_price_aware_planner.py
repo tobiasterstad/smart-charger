@@ -162,6 +162,7 @@ class TestPriceAwarePlanner(unittest.TestCase):
         config = ChargerConfiguration.load_defaults()
         tibber_config = TibberConfig(api_key=secret.tibber_api_key)
         tibber_prices = TibberPrices(tibber_config)
+        today_tomorrow = tibber_prices.today_tomorrow()
         test_planner = PriceAwarePlanner(config, tibber_prices=tibber_prices)
         plan = test_planner.plan_charging(vehicle)
         print(plan)

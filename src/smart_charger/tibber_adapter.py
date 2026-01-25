@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Optional, Dict
 import datetime
-from datetime import datetime
 
 from smart_charger.planner import TariffProvider
 from smart_charger.tibber.tibber_util import TibberPrices
@@ -115,13 +114,13 @@ class TibberPricesAdapter(TariffProvider):
                 # parse starts into datetime if it's a string
                 if isinstance(starts, str):
                     try:
-                        dt = datetime.fromisoformat(starts.replace('Z', '+00:00'))
+                        dt = datetime.datetime.fromisoformat(starts.replace('Z', '+00:00'))
                     except Exception:
                         try:
-                            dt = datetime.fromisoformat(starts)
+                            dt = datetime.datetime.fromisoformat(starts)
                         except Exception:
                             continue
-                elif isinstance(starts, datetime):
+                elif isinstance(starts, datetime.datetime):
                     dt = starts
                 else:
                     continue
@@ -145,7 +144,7 @@ class TibberPricesAdapter(TariffProvider):
         self._build_map_from_prices(prices_obj)
         self._fetched = True
 
-    def price_at(self, dt: datetime) -> float:
+    def price_at(self, dt: datetime.datetime) -> float:
         # normalize to hour
         dt_hour = dt.replace(minute=0, second=0, microsecond=0)
         # ensure we have a map

@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from smart_charger.config import ChargerConfiguration, VehicleConfig
 from smart_charger.tibber.tibber_util import TibberPrices
 from smart_charger.vehicle import VehicleStatus
-from typing import Optional
+from typing import Protocol, List, Tuple, Optional
+from pydantic.dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -324,14 +325,11 @@ class SimpleHourPlanner(BasePlanner):
             charge_hours=planned_charge_hours,
             steps=steps
         )
-
-        logger.info("SimpleHourPlanner plan created: %s", plan)
         return plan
 
 
 # New PriceAwarePlanner
-from typing import Protocol, List, Tuple, Optional
-from pydantic.dataclasses import dataclass
+
 
 class TariffProvider(Protocol):
     """Protocol describing minimal tariff provider interface used by PriceAwarePlanner.
