@@ -1,6 +1,6 @@
 [project]
 name = "smart_charger"
-version = "2.0.0"
+version = "2.0.4"
 description = ""
 authors = [{ name = "Tobias Terstad", email = "tobias@terstad.se" }]
 requires-python = ">=3.13.0"
@@ -16,6 +16,7 @@ dependencies = [
     "click>=8.3.1,<9",
     "requests>=2.32.5,<3",
     "paho-mqtt>=2.1.0,<3",
+    "mqtt-discovery>=1.0.0,<1.1.0",
 ]
 
 [tool.ruff]
@@ -24,6 +25,7 @@ lint.extend-select = ["PTH"]
 [project.scripts]
 mqtt-tool = "smart_charger.tools.mqtt:main"
 smart-charger = "smart_charger.smartcharger:main"
+ctek-tool = "smart_charger.lib.ctek.ctek_cli:main"
 
 [dependency-groups]
 dev = [
@@ -41,6 +43,11 @@ include = ["src/smart_charger"]
 
 [tool.hatch.build.targets.wheel.sources]
 "src/smart_charger" = "smart_charger"
+
+[[tool.uv.index]]
+name = "terstad"
+url = "http://10.100.0.10:8091/simple"
+publish-url = "http://10.100.0.10:8091"
 
 [build-system]
 requires = ["hatchling"]
