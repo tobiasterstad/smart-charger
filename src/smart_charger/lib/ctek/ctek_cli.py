@@ -42,12 +42,23 @@ class CtekMeterService:
             else:
                 logger.error("Failed to connect, return code %d\n", rc)
 
+        def on_disconnect(_client, _userdata, rc):
+            if rc != 0:
+                logger.warning(
+                    f"Unexpected disconnect from MQTT, return code %d. Reconnecting...",
+                    rc,
+                )
+                try:
+                    self.client.reconnect()
+                except Exception as e:
+                    logger.error(f"Failed to reconnect to MQTT: {e}")
+
         client = mqtt_client.Client(
             mqtt_client.CallbackAPIVersion.VERSION1, self.client_id
         )
 
-        # client.username_pw_set(username, password)
         client.on_connect = on_connect
+        client.on_disconnect = on_disconnect
         client.connect(self.broker, self.port)
         return client
 
@@ -94,9 +105,12 @@ class CtekMeterService:
                     logger.error("Failed to get data {}", e)
 
                 # Do not send a zero energy to mqtt, wait for real data
-                if self.energy_kwh > 0:
-                    self.client.publish(self.charger_energy_topic, self.energy_kwh)
-                self.client.publish(self.charger_power_topic, self.power_kw)
+                if self.client is not None and self.client.is_connected():
+                    if self.energy_kwh > 0:
+                        self.client.publish(self.charger_energy_topic, self.energy_kwh)
+                    self.client.publish(self.charger_power_topic, self.power_kw)
+                else:
+                    logger.warning("MQTT not connected, skipping publish")
 
                 await asyncio.sleep(interval_seconds)
         except asyncio.CancelledError:

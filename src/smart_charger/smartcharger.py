@@ -20,6 +20,7 @@ from smart_charger.planner import (
     PriceAwarePlanner,
 )
 from smart_charger.price_providers import TibberPriceProvider
+from smart_charger.solar_providers import MQTTSolarProvider, SolarPriceProvider
 from smart_charger.session import SessionManager, ChargingSession
 from smart_charger.tibber.tibber_util import TibberConfig
 from smart_charger.zaptec import OperatingMode
@@ -58,6 +59,7 @@ class SmartCharger:
 
         self.power_consumption: float = 0.0
         self.power_production: float = 0.0
+        self.solar_provider = MQTTSolarProvider()
         self.session_manager = SessionManager()
 
         if self.config.planner == PlannerType.SIMPLE:
@@ -65,7 +67,12 @@ class SmartCharger:
         elif self.config.planner == PlannerType.TIBBER:
             tibber_config = TibberConfig(api_key=secret.tibber_api_key)
             tibber_prices = TibberPriceProvider(tibber_config)
-            self.planner = PriceAwarePlanner(self.config, price_provider=tibber_prices)
+            solar_price_provider = SolarPriceProvider(
+                tibber_prices, self.solar_provider
+            )
+            self.planner = PriceAwarePlanner(
+                self.config, price_provider=solar_price_provider
+            )
 
         logger.info("Planner configured")
 
@@ -87,8 +94,14 @@ class SmartCharger:
         self.message_listener.add_on_power_consumption_updated(
             self._on_updated_power_consumption
         )
+        self.message_listener.add_on_power_consumption_updated(
+            self.solar_provider.update_consumption
+        )
         self.message_listener.add_on_power_production_changed(
             self._on_power_production_changed
+        )
+        self.message_listener.add_on_power_production_changed(
+            self.solar_provider.update_production
         )
 
         self.message_sender = MessageSender(self.config)

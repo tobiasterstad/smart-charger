@@ -1,10 +1,4 @@
-"""Adapter to expose Tibber tariff data through the TariffProvider protocol.
-
-This adapter is intentionally lightweight: it accepts either a pre-built
-TariffCalculator (from `smart_charger.tibber.tariff`) or a plain mapping of
-timestamps->prices (the latter is passed into TariffCalculator). The adapter
-implements `price_at(datetime) -> float` and is test-friendly.
-"""
+"""Price providers for electricity pricing data."""
 
 from __future__ import annotations
 
@@ -64,25 +58,16 @@ class TibberPriceProvider(PriceProvider):
                 self.prices.append(p)
 
     def _is_old_prices(self):
-        # Prices are considered old if we have no prices or the latest
-        # available price timestamp doesn't include the expected day.
-        # Tibber releases new prices each day at 14:00. If current time is
-        # before 14:00 we expect prices to include today; if current time
-        # is 14:00 or later we expect prices to include tomorrow as well.
         if not self.prices:
             return True
 
         try:
-            # Determine the latest date present in the prices
             latest_date = max(p.startsAt.date() for p in self.prices)
         except Exception:
-            # If startsAt is missing or malformed, treat as old so we refresh
             return True
 
         now = datetime.datetime.now()
         today = now.date()
-        # If it's before 14:00 we expect prices at least for today. After
-        # 14:00 we also expect tomorrow's prices to be available.
         expected_max_date = (
             today if now.hour < 14 else today + datetime.timedelta(days=1)
         )
@@ -90,9 +75,7 @@ class TibberPriceProvider(PriceProvider):
         return latest_date < expected_max_date
 
     def price_at(self, dt: datetime.datetime) -> float:
-        # Refresh prices if we haven't loaded any or if they're considered old
         if self.prices is None or self._is_old_prices():
-            # Only update from remote if we have a util available
             if self.tibber_prices_util is not None:
                 self._update_prices()
 
