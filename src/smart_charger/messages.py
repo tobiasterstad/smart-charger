@@ -82,16 +82,17 @@ class MessageListener:
 
     def subscribe(self, client: mqtt_client.Client):
         def on_message(client, userdata, msg):
-            logger.debug(f"Received `{msg.payload.decode()}` from `{msg.topic}` topic")
+            logger.info(f"Received `{msg.payload.decode()}` from `{msg.topic}` topic")
             for charger_config in self.config.chargers:
                 charger_status = SessionManager.get_charger_status_by_id(
                     self.chargers, charger_config.id
                 )
                 if msg.topic == charger_config.status_topic:
                     value = charger_status.get_connected_from_status(msg)
+                    logger.info(f"Charger value {value}")
                     if charger_status.connected != value:
                         charger_status.connected = value
-                        logger.debug(
+                        logger.info(
                             f"Updated {charger_config.name} connected to {charger_status.connected}"
                         )
                         self._trigger_listeners(
@@ -106,7 +107,7 @@ class MessageListener:
                     value = _decode_bool(msg)
                     if vehicle_status.connected != value:
                         vehicle_status.connected = value
-                        logger.debug(
+                        logger.info(
                             f"Updated {vehicle.name} connected to {vehicle_status.connected}"
                         )
                         self._trigger_listeners(
@@ -152,6 +153,7 @@ class MessageListener:
         for charger in self.config.chargers:
             if charger.connected_topic:
                 client.subscribe(charger.connected_topic)
+                client.subscribe(charger.status_topic)
 
         for vehicle in self.config.vehicles:
             if vehicle.connected_topic:

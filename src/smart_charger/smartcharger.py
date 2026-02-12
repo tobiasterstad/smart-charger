@@ -11,10 +11,17 @@ from smart_charger.chargers import (
     ZaptecCharger,
     ZaptecSettings,
 )
-from smart_charger.config import ChargerConfiguration, ChargerType
+from smart_charger.config import ChargerConfiguration, ChargerType, PlannerType
 from smart_charger.messages import MessageListener, MessageSender
-from smart_charger.planner import VehicleStatus, ChargingStep, SimpleHourPlanner
+from smart_charger.planner import (
+    VehicleStatus,
+    ChargingStep,
+    SimpleHourPlanner,
+    PriceAwarePlanner,
+)
+from smart_charger.price_providers import TibberPriceProvider
 from smart_charger.session import SessionManager, ChargingSession
+from smart_charger.tibber.tibber_util import TibberConfig
 from smart_charger.zaptec import OperatingMode
 
 logger = logging.getLogger(__name__)
@@ -52,12 +59,15 @@ class SmartCharger:
         self.power_consumption: float = 0.0
         self.power_production: float = 0.0
         self.session_manager = SessionManager()
-        self.planner = SimpleHourPlanner(self.config)
 
-        # tibber_config = TibberConfig(api_key=secret.tibber_api_key)
-        # tibber_prices = TibberPrices(tibber_config)
-        # test_planner = PriceAwarePlanner(self.config, tibber_prices=tibber_prices)
-        # test_planner.plan_charging()
+        if self.config.planner == PlannerType.SIMPLE:
+            self.planner = SimpleHourPlanner(self.config)
+        elif self.config.planner == PlannerType.TIBBER:
+            tibber_config = TibberConfig(api_key=secret.tibber_api_key)
+            tibber_prices = TibberPriceProvider(tibber_config)
+            self.planner = PriceAwarePlanner(self.config, price_provider=tibber_prices)
+
+        logger.info("Planner configured")
 
         # register session listeners
         self.session_manager.add_on_session_start_listener(self._on_session_start)
@@ -233,10 +243,10 @@ class SmartCharger:
                     )
 
                 for charger in self.chargers:
-                    self.message_sender.publish(
-                        f"{self.config.smart_charger_topic_prefix}/chargers/{charger.id.lower()}/connected",
-                        charger.connected,
-                    )
+                    # self.message_sender.publish(
+                    #     f"{self.config.smart_charger_topic_prefix}/chargers/{charger.id.lower()}/connected",
+                    #     charger.connected,
+                    # )
                     self.message_sender.publish(
                         f"{self.config.smart_charger_topic_prefix}/chargers/{charger.id.lower()}/charging",
                         charger.charging,
@@ -313,9 +323,8 @@ class SmartCharger:
 
 def main():
     logging.basicConfig(
-        format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO
+        format="%(asctime)s %(levelname)s %(name)s %(message)s", level=logging.INFO
     )
-
     argument_parser = ArgumentParser()
     argument_parser.add_argument(
         "--start", action="store_true", help="Start SmartCharger in the background"

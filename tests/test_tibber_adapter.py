@@ -1,7 +1,8 @@
 import datetime
 import unittest
+from unittest import mock
 
-from smart_charger.tibber_adapter import TibberPricesAdapter
+from smart_charger.price_providers import TibberPriceProvider
 from smart_charger.tibber.tibber_util import (
     PriceInfo,
     PriceData,
@@ -10,6 +11,8 @@ from smart_charger.tibber.tibber_util import (
     Viewer,
     Data,
     Prices,
+    TibberConfig,
+    TibberPrices,
 )
 
 
@@ -49,21 +52,28 @@ class TestTibberAdapter(unittest.TestCase):
         iso_dt = "2026-01-24T00:00:00Z"
         price_value = 0.42
         prices = get_tibber_prices(today_pairs=[(iso_dt, price_value)])
-        adapter = TibberPricesAdapter(prices, fallback_price=9.99)
+        tibber_cfg = TibberConfig(api_key="dummy")
+        # Mock the remote TibberPrices.today_tomorrow to return our prices object
+        with mock.patch.object(TibberPrices, "today_tomorrow", return_value=prices):
+            adapter = TibberPriceProvider(tibber_cfg)
+            adapter.fallback_price = 9.99
 
-        # Query using timezone-aware datetime that matches the parsed 'Z' -> +00:00 key
-        query_dt = datetime.datetime.fromisoformat("2026-01-24T00:00:00+00:00")
-        p = adapter.price_at(query_dt)
-        self.assertAlmostEqual(p, price_value, places=9)
+            # Query using timezone-aware datetime that matches the parsed 'Z' -> +00:00 key
+            query_dt = datetime.datetime.fromisoformat("2026-01-24T00:00:00+00:00")
+            p = adapter.price_at(query_dt)
+            self.assertAlmostEqual(p, price_value, places=9)
 
     def test_tibber_adapter_returns_fallback_on_missing(self):
         # No prices provided -> fallback used
         prices = get_tibber_prices(today_pairs=[], tomorrow_pairs=[])
-        adapter = TibberPricesAdapter(prices, fallback_price=7.77)
+        tibber_cfg = TibberConfig(api_key="dummy")
+        with mock.patch.object(TibberPrices, "today_tomorrow", return_value=prices):
+            adapter = TibberPriceProvider(tibber_cfg)
+            adapter.fallback_price = 7.77
 
-        query_dt = datetime.datetime.fromisoformat("2026-01-24T01:00:00+00:00")
-        p = adapter.price_at(query_dt)
-        self.assertEqual(p, 7.77)
+            query_dt = datetime.datetime.fromisoformat("2026-01-24T01:00:00+00:00")
+            p = adapter.price_at(query_dt)
+            self.assertEqual(p, 7.77)
 
     def test_tibber_adapter_uses_tomorrow_prices(self):
         # If a price appears only in tomorrow, the adapter should include it
@@ -73,8 +83,11 @@ class TestTibberAdapter(unittest.TestCase):
         prices = get_tibber_prices(
             today_pairs=missing_today, tomorrow_pairs=tomorrow_pair
         )
-        adapter = TibberPricesAdapter(prices, fallback_price=5.5)
+        tibber_cfg = TibberConfig(api_key="dummy")
+        with mock.patch.object(TibberPrices, "today_tomorrow", return_value=prices):
+            adapter = TibberPriceProvider(tibber_cfg)
+            adapter.fallback_price = 5.5
 
-        query_dt = datetime.datetime.fromisoformat("2026-01-24T03:00:00+00:00")
-        p = adapter.price_at(query_dt)
-        self.assertAlmostEqual(p, 0.12, places=9)
+            query_dt = datetime.datetime.fromisoformat("2026-01-24T03:00:00+00:00")
+            p = adapter.price_at(query_dt)
+            self.assertAlmostEqual(p, 0.12, places=9)

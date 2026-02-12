@@ -36,6 +36,11 @@ class TariffConfig(BaseModel):
     hours: list[int] = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
 
 
+class PlannerType(enum.Enum):
+    SIMPLE = 1
+    TIBBER = 2
+
+
 class ChargerConfiguration(BaseModel):
     mqtt_broker: str
     mqtt_port: int
@@ -47,6 +52,7 @@ class ChargerConfiguration(BaseModel):
     high_load_threshold: Optional[float] = None
     power_consumption_topic: Optional[str] = None
     power_production_topic: Optional[str] = None
+    planner: PlannerType = PlannerType.SIMPLE
 
     @staticmethod
     def load_defaults():
@@ -56,6 +62,7 @@ class ChargerConfiguration(BaseModel):
             smart_charger_topic_prefix="terstad/smartcharger",
             high_load_threshold=4000,
             tariff=TariffConfig(topic="terstad/energy/tariff"),
+            planner=PlannerType.TIBBER,
         )
         config.chargers = [
             ChargerConfig(
@@ -66,7 +73,7 @@ class ChargerConfiguration(BaseModel):
                 status_topic="terstad/smartcharger/chargers/ctek/status",
             ),
             ChargerConfig(
-                id="GPN018087",
+                id="gpn018087",
                 name="Zaptec Charger",
                 type=ChargerType.ZAPTEC,
                 connected_topic="terstad/smartcharger/chargers/gpn018087/connected",

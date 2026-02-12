@@ -48,6 +48,8 @@ def main():
         value = args.connect_charger.split(":")[1]
         logger.info(f"Publishing charger connected {value}")
         client.publish(f"terstad/smartcharger/chargers/{charger}/connected", value)
+        if value == "true":
+            client.publish(f"terstad/smartcharger/chargers/{charger}/status", "hej")
     elif args.connect_vehicle:
         vehicle = args.connect_vehicle.split(":")[0]
         value = args.connect_vehicle.split(":")[1]

@@ -7,7 +7,7 @@ import uuid
 from pydantic import BaseModel, Field
 
 from smart_charger.config import ChargerConfiguration, VehicleConfig
-from smart_charger.tibber.tibber_util import TibberPrices
+from smart_charger.price_providers import PriceProvider
 from smart_charger.vehicle import VehicleStatus
 from typing import Protocol, List, Tuple, Optional
 from pydantic.dataclasses import dataclass
@@ -366,19 +366,6 @@ class SimpleHourPlanner(BasePlanner):
         return plan
 
 
-# New PriceAwarePlanner
-
-
-class TariffProvider(Protocol):
-    """Protocol describing minimal tariff provider interface used by PriceAwarePlanner.
-
-    Implementations should provide price_at(dt: datetime.datetime) -> float, which
-    returns the price for the hour starting at dt.
-    """
-
-    def price_at(self, dt: datetime.datetime) -> float: ...
-
-
 # Candidate dataclass represents a single candidate hour for charging.
 @dataclass
 class Candidate:
@@ -402,26 +389,10 @@ class PriceAwarePlanner(BasePlanner):
     def __init__(
         self,
         config: ChargerConfiguration,
-        tariff_provider: Optional[TariffProvider] = None,
-        tibber_prices: Optional[TibberPrices] = None,
-        fallback_price: float = 0.0,
+        price_provider: Optional[PriceProvider] = None,
     ):
         self.config = config
-        # If a concrete tariff provider is provided, use it. If a TibberPrices-like
-        # object is provided, wrap it in the TibberPricesAdapter (local import to
-        # avoid circular imports).
-        if tariff_provider is not None:
-            self.tariff_provider = tariff_provider
-        elif tibber_prices is not None:
-            # local import to avoid circular dependency
-            from smart_charger.tibber_adapter import TibberPricesAdapter
-
-            prices_today_tomorrow = tibber_prices.today_tomorrow()
-            self.tariff_provider = TibberPricesAdapter(
-                prices_today_tomorrow, fallback_price=fallback_price
-            )
-        else:
-            self.tariff_provider = None
+        self.price_provider = price_provider
 
     def plan_charging(self, vehicle: VehicleStatus):
         vehicle_config = self.config.get_vehicle_config_by_id(vehicle.id)
@@ -463,7 +434,7 @@ class PriceAwarePlanner(BasePlanner):
         # enrich candidates with price and score in-place, then sort the candidates list by score
         for cand in candidates:
             price = (
-                self.tariff_provider.price_at(cand.dt) if self.tariff_provider else 0.0
+                self.price_provider.price_at(cand.dt) if self.price_provider else 0.0
             )
             cand.price = price
             cand.score = price - (0.0001 if cand.is_night else 0.0)

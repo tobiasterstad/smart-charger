@@ -286,7 +286,7 @@ wheels = [
 
 [[package]]
 name = "smart-charger"
-version = "2.0.4"
+version = "2.0.13"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

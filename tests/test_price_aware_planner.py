@@ -1,11 +1,24 @@
 import datetime
+import random
 import unittest
 from typing import List
+from unittest import mock
 
 from smart_charger import planner, secret
 from smart_charger.config import ChargerConfiguration
 from smart_charger.planner import PriceAwarePlanner, VehicleStatus
-from smart_charger.tibber.tibber_util import TibberConfig, TibberPrices
+from smart_charger.tibber.tibber_util import (
+    TibberConfig,
+    TibberPrices,
+    Prices,
+    Data,
+    Viewer,
+    Home,
+    CurrentSubscription,
+    PriceData,
+    PriceInfo,
+)
+from smart_charger.price_providers import TibberPriceProvider
 
 
 class SimpleTariffProvider:
@@ -54,7 +67,7 @@ class TestPriceAwarePlanner(unittest.TestCase):
         config = ChargerConfiguration.load_defaults()
         # make night hours (0-6) cheap
         provider = SimpleTariffProvider(list(range(0, 7)))
-        planner_obj = planner.PriceAwarePlanner(config, tariff_provider=provider)
+        planner_obj = planner.PriceAwarePlanner(config, price_provider=provider)
 
         vehicle = planner.VehicleStatus(id="leaf", soc=50)
         plan = planner_obj.plan_charging(vehicle)
@@ -86,7 +99,7 @@ class TestPriceAwarePlanner(unittest.TestCase):
         config = ChargerConfiguration.load_defaults()
         # make a run of cheap consecutive hours 22,23,0,1,2
         provider = SimpleTariffProvider([22, 23, 0, 1, 2])
-        planner_obj = planner.PriceAwarePlanner(config, tariff_provider=provider)
+        planner_obj = planner.PriceAwarePlanner(config, price_provider=provider)
 
         # Vehicle needs around 4 hours (as in previous test)
         vehicle = planner.VehicleStatus(id="leaf", soc=50)
@@ -113,7 +126,7 @@ class TestPriceAwarePlanner(unittest.TestCase):
         self.set_now(fixed_dt)
 
         config = ChargerConfiguration.load_defaults()
-        planner_obj = planner.PriceAwarePlanner(config, tariff_provider=None)
+        planner_obj = planner.PriceAwarePlanner(config, price_provider=None)
 
         vehicle = planner.VehicleStatus(id="leaf", soc=50)
         plan = planner_obj.plan_charging(vehicle)
@@ -131,7 +144,7 @@ class TestPriceAwarePlanner(unittest.TestCase):
 
         config = ChargerConfiguration.load_defaults()
         provider = SimpleTariffProvider([0, 1, 2, 3, 4, 5, 6])
-        planner_obj = planner.PriceAwarePlanner(config, tariff_provider=provider)
+        planner_obj = planner.PriceAwarePlanner(config, price_provider=provider)
 
         vehicle = planner.VehicleStatus(id="leaf", soc=0)  # large demand
         plan = planner_obj.plan_charging(vehicle)
@@ -170,12 +183,54 @@ class TestPriceAwarePlanner(unittest.TestCase):
         if len(candidates) == 0:
             assert plan.steps == []
 
-    def test_tibber(self):
+    def test_tibber2(self):
         vehicle = VehicleStatus(id="leaf", soc=50, connected=True)
         config = ChargerConfiguration.load_defaults()
         tibber_config = TibberConfig(api_key=secret.tibber_api_key)
         tibber_prices = TibberPrices(tibber_config)
         today_tomorrow = tibber_prices.today_tomorrow()
-        test_planner = PriceAwarePlanner(config, tibber_prices=tibber_prices)
+        tibber_tariff_provider = TibberPriceProvider(today_tomorrow)
+        test_planner = PriceAwarePlanner(config, price_provider=tibber_tariff_provider)
         plan = test_planner.plan_charging(vehicle)
         print(plan)
+
+    def test_planner_for_many_hours(self):
+        vehicle = VehicleStatus(id="leaf", soc=1, connected=True)
+        config = ChargerConfiguration.load_defaults()
+
+        today = []
+        for hour in [20, 21, 22, 23]:
+            ts = datetime.datetime.now()
+            total = (random.random() * 2) / 10
+            ts.replace(hour=hour, minute=0, second=0, microsecond=0)
+            p = PriceInfo(startsAt=ts, total=total, energy=0, tax=0)
+            today.append(p)
+
+        tomorrow = []
+        for hour in [0, 1, 2, 3, 4, 5, 6]:
+            ts = datetime.datetime.now()
+            total = (random.random()) / 10
+            ts.replace(hour=hour, minute=0, second=0, microsecond=0)
+            p = PriceInfo(startsAt=ts, total=0, energy=0, tax=0)
+            tomorrow.append(p)
+        prices = Prices(
+            data=Data(
+                viewer=Viewer(
+                    homes=[
+                        Home(
+                            currentSubscription=CurrentSubscription(
+                                priceInfo=PriceData(today=today, tomorrow=tomorrow)
+                            )
+                        )
+                    ]
+                )
+            )
+        )
+
+        tibber_cfg = TibberConfig(api_key="dummy")
+        with mock.patch.object(TibberPrices, "today_tomorrow", return_value=prices):
+            tibber_tariff_provider = TibberPriceProvider(tibber_cfg)
+            test_planner = PriceAwarePlanner(
+                config, price_provider=tibber_tariff_provider
+            )
+            plan = test_planner.plan_charging(vehicle)
