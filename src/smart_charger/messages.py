@@ -1,3 +1,4 @@
+import asyncio
 import random
 import logging
 from typing import Callable, Any
@@ -8,7 +9,10 @@ from smart_charger.planner import VehicleStatus
 from smart_charger.session import SessionManager
 from paho.mqtt import client as mqtt_client
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
+
+RECONNECT_DELAY_SECONDS = 5
+RECONNECT_DELAY_MAX_SECONDS = 300
 
 
 class MessageListener:
@@ -65,20 +69,47 @@ class MessageListener:
         self._on_power_production_changed.append(callback)
 
     def connect_mqtt(self):
+        self._reconnect_delay = RECONNECT_DELAY_SECONDS
+
         def on_connect(client, userdata, flags, rc):
             if rc == 0:
                 logger.info("Connected to MQTT Broker!")
+                self._reconnect_delay = RECONNECT_DELAY_SECONDS
             else:
                 logger.error("Failed to connect, return code %d\n", rc)
+
+        def on_disconnect(client, userdata, rc):
+            if rc != 0:
+                logger.warning(
+                    f"Unexpected disconnection from MQTT, return code {rc}. Reconnecting..."
+                )
+                self._schedule_reconnect()
 
         client = mqtt_client.Client(
             mqtt_client.CallbackAPIVersion.VERSION1, self.client_id
         )
 
-        # client.username_pw_set(username, password)
         client.on_connect = on_connect
+        client.on_disconnect = on_disconnect
         client.connect(self.config.mqtt_broker, self.config.mqtt_port)
         return client
+
+    def _schedule_reconnect(self):
+        logger.info(f"Scheduling MQTT reconnection in {self._reconnect_delay} seconds")
+        asyncio.get_event_loop().call_later(self._reconnect_delay, self._do_reconnect)
+        self._reconnect_delay = min(
+            self._reconnect_delay * 2, RECONNECT_DELAY_MAX_SECONDS
+        )
+
+    def _do_reconnect(self):
+        try:
+            logger.info("Attempting MQTT reconnection...")
+            self.client = self.connect_mqtt()
+            self.subscribe(self.client)
+            self.client.loop_start()
+        except Exception as e:
+            logger.error(f"Failed to reconnect: {e}")
+            self._schedule_reconnect()
 
     def subscribe(self, client: mqtt_client.Client):
         def on_message(client, userdata, msg):
@@ -195,20 +226,46 @@ class MessageSender:
         self.client = None  # MQTT client
 
     def connect_mqtt(self):
+        self._reconnect_delay = RECONNECT_DELAY_SECONDS
+
         def on_connect(client, userdata, flags, rc):
             if rc == 0:
                 logger.info("Connected to MQTT Broker!")
+                self._reconnect_delay = RECONNECT_DELAY_SECONDS
             else:
                 logger.error("Failed to connect, return code %d\n", rc)
+
+        def on_disconnect(client, userdata, rc):
+            if rc != 0:
+                logger.warning(
+                    f"Unexpected disconnection from MQTT, return code {rc}. Reconnecting..."
+                )
+                self._schedule_reconnect()
 
         client = mqtt_client.Client(
             mqtt_client.CallbackAPIVersion.VERSION1, self.client_id
         )
 
-        # client.username_pw_set(username, password)
         client.on_connect = on_connect
+        client.on_disconnect = on_disconnect
         client.connect(self.config.mqtt_broker, self.config.mqtt_port)
         return client
+
+    def _schedule_reconnect(self):
+        logger.info(f"Scheduling MQTT reconnection in {self._reconnect_delay} seconds")
+        asyncio.get_event_loop().call_later(self._reconnect_delay, self._do_reconnect)
+        self._reconnect_delay = min(
+            self._reconnect_delay * 2, RECONNECT_DELAY_MAX_SECONDS
+        )
+
+    def _do_reconnect(self):
+        try:
+            logger.info("Attempting MQTT reconnection...")
+            self.client = self.connect_mqtt()
+            self.client.loop_start()
+        except Exception as e:
+            logger.error(f"Failed to reconnect: {e}")
+            self._schedule_reconnect()
 
     def start(self):
         self.client = self.connect_mqtt()

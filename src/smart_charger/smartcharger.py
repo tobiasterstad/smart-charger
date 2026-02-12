@@ -3,6 +3,8 @@ import datetime
 import logging
 import uuid
 from argparse import ArgumentParser
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Optional
 
 from smart_charger import secret
@@ -28,6 +30,19 @@ from smart_charger.tibber.tibber_util import TibberConfig
 from smart_charger.zaptec import OperatingMode
 
 logger = logging.getLogger(__name__)
+
+
+class HealthStatus(str, Enum):
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+
+
+@dataclass
+class HealthCheckResult:
+    status: HealthStatus
+    message: str
+    details: dict = field(default_factory=dict)
 
 
 class SmartCharger:
@@ -83,35 +98,37 @@ class SmartCharger:
 
         logger.info("Planner configured")
 
-        # register session listeners
-        self.session_manager.add_on_session_start_listener(self._on_session_start)
-        self.session_manager.add_on_session_stop_listener(self._on_session_stop)
-
         self.message_listener = MessageListener(
             self.config, self.chargers, self.vehicles
         )
-        self.message_listener.add_on_connected_charger_listener(
-            self.session_manager.connected_charger
-        )
-        self.message_listener.add_on_connected_vehicle_listener(
-            self.session_manager.connected_vehicle
-        )
-        self.message_listener.add_on_target_reached_listeners(self._on_target_reached)
-        self.message_listener.add_on_soc_changed_listeners(self._on_soc_changed)
-        self.message_listener.add_on_power_consumption_updated(
-            self._on_updated_power_consumption
-        )
-        self.message_listener.add_on_power_consumption_updated(
-            self.solar_provider.update_consumption
-        )
-        self.message_listener.add_on_power_production_changed(
-            self._on_power_production_changed
-        )
-        self.message_listener.add_on_power_production_changed(
-            self.solar_provider.update_production
-        )
-
         self.message_sender = MessageSender(self.config)
+
+        self._register_event_listeners()
+
+    def _register_event_listeners(self):
+        """Register all event listeners."""
+        # Session events
+        self.session_manager.add_on_session_start_listener(self._on_session_start)
+        self.session_manager.add_on_session_stop_listener(self._on_session_stop)
+
+        # MQTT message events -> session management
+        ml = self.message_listener
+        ml.add_on_connected_charger_listener(self.session_manager.connected_charger)
+        ml.add_on_connected_vehicle_listener(self.session_manager.connected_vehicle)
+        ml.add_on_target_reached_listeners(self._on_target_reached)
+        ml.add_on_soc_changed_listeners(self._on_soc_changed)
+
+        # Power events (multiple handlers)
+        for cb in (
+            self._on_updated_power_consumption,
+            self.solar_provider.update_consumption,
+        ):
+            ml.add_on_power_consumption_updated(cb)
+        for cb in (
+            self._on_power_production_changed,
+            self.solar_provider.update_production,
+        ):
+            ml.add_on_power_production_changed(cb)
 
     def _on_session_start(self, session: ChargingSession):
         """Handle new or updated sessions.
@@ -379,6 +396,53 @@ class SmartCharger:
                 return vehicle
         return None
 
+    def check_health(self) -> HealthCheckResult:
+        """Check the health of all system components."""
+        issues = []
+        details = {}
+
+        mqtt_healthy = (
+            self.message_listener.client is not None
+            and self.message_listener.client.is_connected()
+        )
+        details["mqtt_listener"] = "connected" if mqtt_healthy else "disconnected"
+
+        mqtt_sender_healthy = (
+            self.message_sender.client is not None
+            and self.message_sender.client.is_connected()
+        )
+        details["mqtt_sender"] = "connected" if mqtt_sender_healthy else "disconnected"
+
+        if not mqtt_healthy or not mqtt_sender_healthy:
+            issues.append("MQTT not connected")
+
+        connected_vehicles = sum(1 for v in self.vehicles if v.connected)
+        details["vehicles_connected"] = f"{connected_vehicles}/{len(self.vehicles)}"
+
+        connected_chargers = sum(1 for c in self.chargers if c.connected)
+        details["chargers_connected"] = f"{connected_chargers}/{len(self.chargers)}"
+
+        active_sessions = len(self.session_manager.current_sessions)
+        details["active_sessions"] = active_sessions
+
+        if self.power_production > 0:
+            details["solar_production_w"] = self.power_production
+
+        if self.power_consumption > 0:
+            details["consumption_w"] = self.power_consumption
+
+        if issues:
+            status = HealthStatus.UNHEALTHY
+            message = "; ".join(issues)
+        elif connected_vehicles == 0 and connected_chargers == 0:
+            status = HealthStatus.DEGRADED
+            message = "No vehicles or chargers connected"
+        else:
+            status = HealthStatus.HEALTHY
+            message = "All systems operational"
+
+        return HealthCheckResult(status=status, message=message, details=details)
+
 
 def main():
     logging.basicConfig(
@@ -393,7 +457,19 @@ def main():
         action="store_true",
         help="Run without controlling chargers (dry-run mode)",
     )
+    argument_parser.add_argument(
+        "--health", action="store_true", help="Run health check and exit"
+    )
     args = argument_parser.parse_args()
+    if args.health:
+        import json
+
+        smart_charger = SmartCharger(read_only=args.read_only)
+        result = smart_charger.check_health()
+        print(f"Health Status: {result.status.value}")
+        print(f"Message: {result.message}")
+        print(f"Details: {json.dumps(result.details, indent=2)}")
+        return
     if args.start:
         charger = SmartCharger(read_only=args.read_only)
         charger.run_async()
