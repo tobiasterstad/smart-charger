@@ -219,3 +219,13 @@ Do not hardcode settings, use the config files instead since the app should be g
 - Power production: `terstad/energy/production` (watts)
 - Vehicle SOC: `terstad/vehicles/{id}/soc`
 - Charger status: `terstad/smartcharger/chargers/{id}/status`
+
+# Run the smart-charger
+
+## Connect vehicle leaf
+
+uv run mqtt-tool --connect-vehicle leaf:true
+
+## Connect charger 
+
+uv run mqtt-tool --connect-charger gpn018087:true

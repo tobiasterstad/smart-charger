@@ -4,6 +4,8 @@ import unittest
 from typing import List
 from unittest import mock
 
+import pytest
+
 from smart_charger import planner, secret
 from smart_charger.config import ChargerConfiguration
 from smart_charger.planner import PriceAwarePlanner, VehicleStatus
@@ -183,6 +185,7 @@ class TestPriceAwarePlanner(unittest.TestCase):
         if len(candidates) == 0:
             assert plan.steps == []
 
+    @pytest.mark.integration
     def test_tibber2(self):
         vehicle = VehicleStatus(id="leaf", soc=50, connected=True)
         config = ChargerConfiguration.load_defaults()

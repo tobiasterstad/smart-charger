@@ -39,6 +39,8 @@ def main():
     parser.add_argument(
         "--update-soc", type=str, help="Update SOC for vehicle, <vehicle>:<SOC>"
     )
+    parser.add_argument("--production", type=int, help="Publish production in watts")
+    parser.add_argument("--consumption", type=int, help="Publish consumption in watts")
     args = parser.parse_args()
 
     client = connect_mqtt()
@@ -49,7 +51,10 @@ def main():
         logger.info(f"Publishing charger connected {value}")
         client.publish(f"terstad/smartcharger/chargers/{charger}/connected", value)
         if value == "true":
-            client.publish(f"terstad/smartcharger/chargers/{charger}/status", "hej")
+            client.publish(
+                f"terstad/smartcharger/chargers/{charger}/status",
+                "Connected_Requesting",
+            )
     elif args.connect_vehicle:
         vehicle = args.connect_vehicle.split(":")[0]
         value = args.connect_vehicle.split(":")[1]
@@ -59,6 +64,12 @@ def main():
         vehicle = args.update_soc.split(":")[0]
         soc = args.update_soc.split(":")[1]
         client.publish(f"terstad/vehicles/{vehicle}/soc", soc)
+    elif args.production is not None:
+        logger.info(f"Publishing production {args.production} watts")
+        client.publish("terstad/energy/production", args.production)
+    elif args.consumption is not None:
+        logger.info(f"Publishing consumption {args.consumption} watts")
+        client.publish("terstad/energy/consumption", args.consumption)
 
     print("main() called")
 

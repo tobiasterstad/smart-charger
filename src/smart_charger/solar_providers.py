@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import datetime
+import logging
 from typing import Protocol, Optional
+
+
+logger = logging.getLogger(__name__)
 
 
 class SolarProvider(Protocol):
@@ -57,6 +61,7 @@ class MQTTSolarProvider:
 
     def update_production(self, watts: float):
         """Called when MQTT receives production update."""
+        logger.info(f"Received power production {watts} w")
         self._current_production_watts = watts
 
     def update_consumption(self, watts: float):

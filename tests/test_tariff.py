@@ -1,8 +1,11 @@
 import json
 
+import pytest
+
 from smart_charger.tibber.tariff import TibberCostPerHour
 
 
+@pytest.mark.integration
 class TestTariff:
     def test_example(self):
         tibber = TibberCostPerHour()

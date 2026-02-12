@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import logging
+import uuid
 from argparse import ArgumentParser
 from typing import Optional
 
@@ -18,6 +19,7 @@ from smart_charger.planner import (
     ChargingStep,
     SimpleHourPlanner,
     PriceAwarePlanner,
+    get_now,
 )
 from smart_charger.price_providers import TibberPriceProvider
 from smart_charger.solar_providers import MQTTSolarProvider, SolarPriceProvider
@@ -29,10 +31,13 @@ logger = logging.getLogger(__name__)
 
 
 class SmartCharger:
-    def __init__(self):
+    def __init__(self, read_only: bool = False):
         self.config = ChargerConfiguration.load_defaults()
         self.vehicles: list[VehicleStatus] = []
         self.chargers: list[BaseCharger] = []
+
+        if read_only:
+            logger.info("Running in READ-ONLY mode - no charger commands will be sent")
 
         for vehicle in self.config.vehicles:
             logger.info("Configure vehicle: %s", vehicle)
@@ -42,7 +47,7 @@ class SmartCharger:
             logger.info("Configure charger: %s", charger_config)
 
             if charger_config.type == ChargerType.CTEK:
-                charger = CtekCharger(id=charger_config.id)
+                charger = CtekCharger(id=charger_config.id, read_only=read_only)
             elif charger_config.type == ChargerType.ZAPTEC:
                 settings = ZaptecSettings(
                     username=secret.username,
@@ -51,7 +56,9 @@ class SmartCharger:
                     charger_id=secret.charger_id,
                     base_url="https://api.zaptec.local",  # optional
                 )
-                charger = ZaptecCharger(id=charger_config.id, settings=settings)
+                charger = ZaptecCharger(
+                    id=charger_config.id, settings=settings, read_only=read_only
+                )
             else:
                 raise ValueError(f"Unknown charger type: {charger_config.type}")
 
@@ -206,6 +213,35 @@ class SmartCharger:
                     charger = session.charger
                     plan = session.plan
                     charging_step = plan.get_charging_step() if plan else None
+
+                    # Check for solar surplus charging opportunity
+                    if (
+                        self.config.solar_surplus_charging
+                        and not charger.charging
+                        and session.vehicle
+                        and session.vehicle.connected
+                        and charger.connected
+                    ):
+                        solar_excess = self.solar_provider.current_excess_watts
+                        logger.info(
+                            f"Solar excess: {solar_excess}W, min required: {self.config.solar_min_excess_watts}W"
+                        )
+                        if solar_excess >= self.config.solar_min_excess_watts:
+                            logger.info(
+                                f"Starting solar surplus charging, excess {solar_excess}W >= {self.config.solar_min_excess_watts}W"
+                            )
+                            solar_step = ChargingStep(
+                                id=str(uuid.uuid4()),
+                                start_time=get_now(),
+                                current=6,
+                                description="Solar surplus charging",
+                                solar_priority=True,
+                                solar_max_current=6,
+                            )
+                            charger.charging = True
+                            plan.active_step = solar_step
+                            self._on_charge_start(session, solar_step)
+
                     if charging_step and not charger.charging:
                         logger.info(
                             f"Starting charging, current {charging_step.current}"
@@ -223,10 +259,20 @@ class SmartCharger:
                             session, previous_charging_step, charging_step
                         )
                     elif not charging_step and charger and charger.charging:
-                        logger.info("Stop charging")
-                        charger.charging = False
-                        plan.active_step = None
-                        self._on_charge_stop(session)
+                        # Only stop if not a solar surplus charging step
+                        if plan.active_step and plan.active_step.solar_priority:
+                            # Check if we still have excess, if not stop
+                            solar_excess = self.solar_provider.current_excess_watts
+                            if solar_excess < self.config.solar_min_excess_watts:
+                                logger.info("Stop charging - no more solar excess")
+                                charger.charging = False
+                                plan.active_step = None
+                                self._on_charge_stop(session)
+                        else:
+                            logger.info("Stop charging")
+                            charger.charging = False
+                            plan.active_step = None
+                            self._on_charge_stop(session)
 
                 await asyncio.sleep(check_interval_seconds)
         except asyncio.CancelledError:
@@ -342,9 +388,14 @@ def main():
     argument_parser.add_argument(
         "--start", action="store_true", help="Start SmartCharger in the background"
     )
+    argument_parser.add_argument(
+        "--read-only",
+        action="store_true",
+        help="Run without controlling chargers (dry-run mode)",
+    )
     args = argument_parser.parse_args()
     if args.start:
-        charger = SmartCharger()
+        charger = SmartCharger(read_only=args.read_only)
         charger.run_async()
 
 

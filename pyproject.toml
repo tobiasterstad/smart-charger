@@ -34,6 +34,12 @@ dev = [
     "pytest-cov>=7.0.0",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+]
+addopts = "-m \"not integration\""
+
 [tool.hatch.build.targets.sdist]
 include = ["src/smart_charger"]
 

@@ -14,6 +14,7 @@ class BaseCharger(abc.ABC, BaseModel):
     connected: bool = False
     charging: bool = False
     current: float = 0
+    read_only: bool = False
 
     @abc.abstractmethod
     def charger_type(self) -> ChargerType:
@@ -94,6 +95,9 @@ class ZaptecCharger(BaseCharger):
         # call base validation
         super().set_current(current)
         logger.info("Set current to %s A on Zaptec charger %s", current, self.id)
+        if self.read_only:
+            logger.info("Read-only mode: skipping actual current update")
+            return
         # use the client if available; tolerate missing client for tests/mocks
         if self._client is not None:
             try:
@@ -107,6 +111,9 @@ class ZaptecCharger(BaseCharger):
     def start_charging(self):
         super().start_charging()
         logger.info(f"Starting Zaptec charger ID: {self.id}")
+        if self.read_only:
+            logger.info("Read-only mode: skipping actual start command")
+            return
         try:
             self._client.send_charger_command(
                 charger_id=self.settings.charger_id, command_id=ChargerCommands.START
@@ -117,6 +124,9 @@ class ZaptecCharger(BaseCharger):
     def stop_charging(self):
         super().stop_charging()
         logger.info(f"Stopping Zaptec charger ID: {self.id}")
+        if self.read_only:
+            logger.info("Read-only mode: skipping actual stop command")
+            return
         try:
             self._client.send_charger_command(
                 charger_id=self.settings.charger_id, command_id=ChargerCommands.STOP

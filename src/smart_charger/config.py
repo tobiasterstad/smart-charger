@@ -53,6 +53,8 @@ class ChargerConfiguration(BaseModel):
     power_consumption_topic: Optional[str] = None
     power_production_topic: Optional[str] = None
     planner: PlannerType = PlannerType.SIMPLE
+    solar_surplus_charging: bool = True
+    solar_min_excess_watts: float = 1500
 
     @staticmethod
     def load_defaults():

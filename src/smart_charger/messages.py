@@ -88,7 +88,9 @@ class MessageListener:
                     self.chargers, charger_config.id
                 )
                 if msg.topic == charger_config.status_topic:
-                    value = charger_status.get_connected_from_status(msg)
+                    value = charger_status.get_connected_from_status(
+                        msg.payload.decode()
+                    )
                     logger.info(f"Charger value {value}")
                     if charger_status.connected != value:
                         charger_status.connected = value
@@ -143,6 +145,7 @@ class MessageListener:
             if msg.topic == self.config.power_production_topic:
                 try:
                     power = float(msg.payload.decode())
+                    logger.info(f"Received production: {power} watts")
                     self._trigger_listeners(self._on_power_production_changed, power)
                 except ValueError:
                     logger.error(f"Invalid power payload: {msg.payload}")
@@ -162,6 +165,7 @@ class MessageListener:
                 client.subscribe(vehicle.soc_topic)
 
         client.subscribe(self.config.power_consumption_topic)
+        client.subscribe(self.config.power_production_topic)
         client.on_message = on_message
 
     @staticmethod
