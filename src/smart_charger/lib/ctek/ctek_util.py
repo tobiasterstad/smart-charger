@@ -498,12 +498,13 @@ class CTEK:
 
         return json.loads(response.text)
 
-    def get_meter(self):
+    def get_meter(self) -> int:
         latest = self.get_history(page_size=1)
-        if latest:
-            return latest["list"][0]["meter_stop"]
-        else:
-            return None
+
+        print(latest)
+
+        meter_stop_ = latest["list"][0]["meter_stop"]
+        return meter_stop_
 
     def ctek_error_handler(self, response):
         err = json.loads(response.text)

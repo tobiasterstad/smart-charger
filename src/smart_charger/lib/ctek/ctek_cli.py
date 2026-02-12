@@ -33,7 +33,7 @@ class CtekMeterService:
         self.charger_power_topic = "terstad/smartcharger/chargers/ctek/power"
 
         self.energy_kwh = 0
-        self.power_kwh = 0
+        self.power_kw = 0
 
     def connect_mqtt(self):
         def on_connect(_client, _userdata, _flags, rc):
@@ -54,25 +54,49 @@ class CtekMeterService:
     async def send_meter_task(self, interval_seconds: int):
         try:
             while True:
-                self.ctek_client.login_if_needed()
-                meter = self.ctek_client.get_meter()
+                try:
+                    self.ctek_client.login_if_needed()
+                    status = self.ctek_client.get_status()
 
-                session = self.ctek_client.get_current_session()
-                if session:
-                    logger.info(
-                        f"Watt hours consumed in session: {session.watt_hours_consumed}"
+                    print(status)
+
+                    meter = self.ctek_client.get_meter()
+                    session = self.ctek_client.get_current_session()
+
+                    logger.warning(
+                        f"Ongoing transaction: {session.ongoing_transaction}"
                     )
-                    logger.info(f"Power: {session.momentary_power}")
 
-                energy_kwh = (meter + session.watt_hours_consumed) / 1000
-                # Make sure the meter is increasing when switching from a session
-                if energy_kwh > self.energy_kwh:
-                    self.energy_kwh = energy_kwh
+                    if session and session.ongoing_transaction:
+                        logger.debug(
+                            f"momentary power {session.momentary_power}, watt hours consumed {session.watt_hours_consumed}"
+                        )
+                        self.power_kw = (
+                            float(session.momentary_power) / 1000
+                            if session.momentary_power
+                            else 0
+                        )
+                        self.energy_kwh = (
+                            float(meter + session.watt_hours_consumed) / 1000
+                            if meter and meter > 0
+                            else 0
+                        )
+                    else:
+                        logger.debug("No charging session")
+                        self.power_kw = 0
+                        self.energy_kwh = (
+                            float(meter) / 1000 if meter and meter > 0 else 0.0
+                        )
 
-                self.power_kwh = float(session.momentary_power) / 1000
+                    logger.info(f"energy {self.energy_kwh} kwh, {self.power_kw} kw")
 
-                self.client.publish(self.charger_energy_topic, self.energy_kwh)
-                self.client.publish(self.charger_power_topic, self.power_kwh)
+                except Exception as e:
+                    logger.error("Failed to get data {}", e)
+
+                # Do not send a zero energy to mqtt, wait for real data
+                if self.energy_kwh > 0:
+                    self.client.publish(self.charger_energy_topic, self.energy_kwh)
+                self.client.publish(self.charger_power_topic, self.power_kw)
 
                 await asyncio.sleep(interval_seconds)
         except asyncio.CancelledError:
@@ -126,10 +150,11 @@ class CtekMeterService:
         ha_discovery.discover(discovery)
 
         self.client = self.connect_mqtt()
-
+        self.client.loop_start()
         try:
             asyncio.run(self._run_async_tasks())
         finally:
+            self.client.loop_stop()
             pass
 
 
