@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
-from smart_charger import secret
+from smart_charger.secrets import Secrets
 from smart_charger.chargers import (
     BaseCharger,
     CtekCharger,
@@ -49,6 +49,7 @@ class HealthCheckResult:
 class SmartCharger:
     def __init__(self, read_only: bool = False):
         self.config = ChargerConfiguration.load_defaults()
+        secrets = Secrets()
         self.vehicles: list[VehicleStatus] = []
         self.chargers: list[BaseCharger] = []
 
@@ -66,10 +67,13 @@ class SmartCharger:
                 charger = CtekCharger(id=charger_config.id, read_only=read_only)
             elif charger_config.type == ChargerType.ZAPTEC:
                 settings = ZaptecSettings(
-                    username=secret.username,
-                    password=secret.password,
-                    installation_id=secret.installation_id,
-                    charger_id=secret.charger_id,
+                    username=secrets.username,
+                    password=secrets.password,
+                    installation_id=secrets.installation_id,
+                    charger_id=secrets.charger_id,
+                    access_token=secrets.zaptec_access_token,
+                    token_expires_at=secrets.zaptec_token_expires_at,
+                    on_token_refreshed=secrets.save_zaptec_token,
                     base_url="https://api.zaptec.local",  # optional
                 )
                 charger = ZaptecCharger(
@@ -94,7 +98,7 @@ class SmartCharger:
             self.solar_price_provider = None
         elif self.config.planner == PlannerType.TIBBER:
             logger.info("Configure Tibber hour planner")
-            tibber_config = TibberConfig(api_key=secret.tibber_api_key)
+            tibber_config = TibberConfig(api_key=secrets.tibber_api_key)
             tibber_prices = TibberPriceProvider(tibber_config)
             self.solar_price_provider = SolarPriceProvider(
                 tibber_prices, self.solar_provider

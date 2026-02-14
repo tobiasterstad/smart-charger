@@ -52,12 +52,18 @@ class BaseCharger(abc.ABC, BaseModel):
 
 # Small dataclass to hold Zaptec credentials and options. This keeps secrets out of
 # your code and makes it easy to create settings objects in tests.
+from typing import Callable, Optional
+
+
 @dataclass
 class ZaptecSettings:
     username: str
     password: str
     installation_id: str
     charger_id: str
+    access_token: Optional[str] = None
+    token_expires_at: Optional[str] = None
+    on_token_refreshed: Optional[Callable[[str, int], None]] = None
     base_url: Optional[str] = None
 
 
@@ -76,14 +82,20 @@ class ZaptecCharger(BaseCharger):
     _client: Optional[ZaptecClient] = PrivateAttr(None)
 
     def model_post_init(self, __context):
-        # Create the client and authenticate. Keep errors visible so callers can
-        # handle failures (or tests can monkeypatch ZaptecClient).
-        if self.settings.base_url:
-            self._client = ZaptecClient()
-        else:
-            self._client = ZaptecClient()
+        import datetime
 
-        # authenticate; ZaptecClient should raise on auth failure
+        token_expires_at = None
+        if self.settings.token_expires_at:
+            token_expires_at = datetime.datetime.fromisoformat(
+                self.settings.token_expires_at
+            )
+
+        self._client = ZaptecClient(
+            initial_access_token=self.settings.access_token,
+            token_expires_at=token_expires_at,
+            on_token_refreshed=self.settings.on_token_refreshed,
+        )
+
         self._client.authenticate(
             username=self.settings.username, password=self.settings.password
         )

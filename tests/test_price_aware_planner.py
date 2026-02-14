@@ -6,7 +6,8 @@ from unittest import mock
 
 import pytest
 
-from smart_charger import planner, secret
+from smart_charger import planner
+from smart_charger.secrets import Secrets
 from smart_charger.config import ChargerConfiguration
 from smart_charger.planner import PriceAwarePlanner, VehicleStatus
 from smart_charger.tibber.tibber_util import (
@@ -189,7 +190,8 @@ class TestPriceAwarePlanner(unittest.TestCase):
     def test_tibber2(self):
         vehicle = VehicleStatus(id="leaf", soc=50, connected=True)
         config = ChargerConfiguration.load_defaults()
-        tibber_config = TibberConfig(api_key=secret.tibber_api_key)
+        secrets = Secrets()
+        tibber_config = TibberConfig(api_key=secrets.tibber_api_key)
         tibber_tariff_provider = TibberPriceProvider(tibber_config)
         test_planner = PriceAwarePlanner(config, price_provider=tibber_tariff_provider)
         plan = test_planner.plan_charging(vehicle)

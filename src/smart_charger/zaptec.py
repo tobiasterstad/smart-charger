@@ -1,9 +1,12 @@
 import datetime
 import enum
-from typing import Optional
+import logging
+from typing import Callable, Optional
 
 import requests
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class TokenResponse(BaseModel):
@@ -146,27 +149,70 @@ class OperatingMode(enum.Enum):
 
 
 class ZaptecClient:
-    access_token: Optional[str] = None
-    refresh_token: Optional[str] = None
-    expires_in: Optional[int] = None
+    def __init__(
+        self,
+        initial_access_token: Optional[str] = None,
+        token_expires_at: Optional[datetime.datetime] = None,
+        on_token_refreshed: Optional[Callable[[str, int], None]] = None,
+    ):
+        self.access_token: Optional[str] = initial_access_token
+        self._token_expires_at: Optional[datetime.datetime] = token_expires_at
+        self._on_token_refreshed = on_token_refreshed
+        self._username: Optional[str] = None
+        self._password: Optional[str] = None
 
-    def __init__(self):
-        self.access_token: Optional[str] = None
+    def authenticate(
+        self,
+        username: str,
+        password: str,
+    ) -> str:
+        self._username = username
+        self._password = password
 
-    def authenticate(self, username: str, password: str) -> str:
-        token_response = self._get_access_token(username, password)
+        if (
+            self.access_token
+            and self._token_expires_at
+            and datetime.datetime.now() < self._token_expires_at
+        ):
+            logger.info("Using cached access token")
+            return self.access_token
+
+        logger.info("Attempting password authentication")
+        token_response = self._get_access_token(
+            username,
+            password,
+            token_url="https://api.zaptec.com/oauth/token",
+        )
+        logger.info("Token response: expires_in=%s", token_response.expires_in)
         self.access_token = token_response.access_token
-        self.refresh_token = token_response.refresh_token
-        self.expires_in = token_response.expires_in
+        self._token_expires_at = datetime.datetime.now() + datetime.timedelta(
+            seconds=token_response.expires_in - 60
+        )
+        logger.info("Password authentication successful")
+
+        if self._on_token_refreshed:
+            self._on_token_refreshed(self.access_token, token_response.expires_in)
+
         return self.access_token
+
+    def _ensure_valid_token(self) -> None:
+        if (
+            not self.access_token
+            or not self._token_expires_at
+            or datetime.datetime.now() >= self._token_expires_at
+        ):
+            if not self._username or not self._password:
+                raise Exception("Not authenticated and no credentials available")
+            logger.info("Token expired, re-authenticating")
+            self.authenticate(self._username, self._password)
 
     @staticmethod
     def _get_access_token(
         username: str,
         password: str,
-        token_url: str = "https://api.zaptec.com/oauth/token",
         client_id: Optional[str] = None,
         client_secret: Optional[str] = None,
+        token_url: str = "https://api.zaptec.com/oauth/token",
         timeout: int = 10,
     ) -> TokenResponse:
         """Request an OAuth token using the Resource Owner Password Credentials grant.
@@ -177,9 +223,9 @@ class ZaptecClient:
         Args:
             username: The user's username.
             password: The user's password.
-            token_url: OAuth token endpoint.
             client_id: Optional client_id to include in the form.
             client_secret: Optional client_secret to include in the form.
+            token_url: OAuth token endpoint.
             timeout: Request timeout in seconds.
 
         Raises:
@@ -192,7 +238,6 @@ class ZaptecClient:
                 "username and password are required to obtain an access token"
             )
 
-        # build the form body
         data = {
             "grant_type": "password",
             "username": username,
@@ -206,13 +251,57 @@ class ZaptecClient:
 
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
+        try:
+            response = requests.post(
+                token_url, data=data, headers=headers, timeout=timeout
+            )
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            logger.error("OAuth request failed: %s - %s", e, response.text)
+            raise
+
+        return TokenResponse.model_validate_json(response.text)
+
+    @staticmethod
+    def _refresh_token(
+        refresh_token: str,
+        client_id: Optional[str] = None,
+        client_secret: Optional[str] = None,
+        token_url: str = "https://api.zaptec.com/oauth/token",
+        timeout: int = 10,
+    ) -> TokenResponse:
+        """Request a new access token using a refresh token.
+
+        Args:
+            refresh_token: The refresh token.
+            client_id: Optional OAuth client ID.
+            client_secret: Optional OAuth client secret.
+            token_url: OAuth token endpoint.
+            timeout: Request timeout in seconds.
+
+        Raises:
+            requests.HTTPError: If the response has an HTTP error status.
+            requests.RequestException: For other transport errors.
+        """
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }
+
+        if client_id:
+            data["client_id"] = client_id
+        if client_secret:
+            data["client_secret"] = client_secret
+
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
         response = requests.post(token_url, data=data, headers=headers, timeout=timeout)
 
-        # raise for HTTP errors, tests can assert for these exceptions
         response.raise_for_status()
         return TokenResponse.model_validate_json(response.text)
 
     def get_installations(self):
+        self._ensure_valid_token()
         url = "https://api.zaptec.com/api/installation"
         headers = {
             "accept": "application/json",
@@ -224,6 +313,7 @@ class ZaptecClient:
     def update_installation(
         self, installation_id: str, available_current: float
     ) -> None:
+        self._ensure_valid_token()
         url = f"https://api.zaptec.com/api/installation/{installation_id}/update"
         headers = {
             "accept": "application/json",
@@ -240,6 +330,7 @@ class ZaptecClient:
             )
 
     def get_charger_details(self, charger_id: str) -> ChargerDetail:
+        self._ensure_valid_token()
         url = f"https://api.zaptec.com/api/chargers/{charger_id}"
         headers = {
             "accept": "application/json",
@@ -254,6 +345,7 @@ class ZaptecClient:
         return ChargerDetail.model_validate_json(response_text)
 
     def get_charger_state(self, charger_id: str) -> ChargerStateResponse:
+        self._ensure_valid_token()
         url = f"https://api.zaptec.com/api/chargers/{charger_id}/state"
         headers = {
             "accept": "application/json",
@@ -268,6 +360,7 @@ class ZaptecClient:
         return ChargerStateResponse.model_validate_json(response_text)
 
     def update_charger(self, charger_id: str, max_current: float) -> None:
+        self._ensure_valid_token()
         url = f"https://api.zaptec.com/api/chargers/{charger_id}/update"
         headers = {
             "content-type": "application/*+json",
@@ -283,6 +376,7 @@ class ZaptecClient:
     def send_charger_command(
         self, charger_id: str, command_id: ChargerCommands
     ) -> None:
+        self._ensure_valid_token()
         url = f"https://api.zaptec.com/api/chargers/{charger_id}/sendCommand/{command_id.value}"
         headers = {
             "content-type": "application/*+json",
