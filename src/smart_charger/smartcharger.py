@@ -26,6 +26,7 @@ from smart_charger.planner import (
 from smart_charger.price_providers import TibberPriceProvider
 from smart_charger.solar_providers import MQTTSolarProvider, SolarPriceProvider
 from smart_charger.session import SessionManager, ChargingSession
+from smart_charger.tariff import create_tariff_provider, TariffProvider
 from smart_charger.tibber.tibber_util import TibberConfig
 from smart_charger.zaptec import OperatingMode
 
@@ -80,23 +81,31 @@ class SmartCharger:
             self.chargers.append(charger)
 
         self.power_consumption: float = 0.0
+        self.power_consumption_high: bool = False
         self.power_production: float = 0.0
+        self.power_accumulated_hourly_consumption: float = 0.0
+        self.power_accumulated_hourly_consumption_high: bool = False
         self.solar_provider = MQTTSolarProvider()
         self.session_manager = SessionManager()
 
         if self.config.planner == PlannerType.SIMPLE:
+            logger.info("Configure simple hour planner")
             self.planner = SimpleHourPlanner(self.config)
+            self.solar_price_provider = None
         elif self.config.planner == PlannerType.TIBBER:
+            logger.info("Configure Tibber hour planner")
             tibber_config = TibberConfig(api_key=secret.tibber_api_key)
             tibber_prices = TibberPriceProvider(tibber_config)
-            solar_price_provider = SolarPriceProvider(
+            self.solar_price_provider = SolarPriceProvider(
                 tibber_prices, self.solar_provider
             )
             self.planner = PriceAwarePlanner(
-                self.config, price_provider=solar_price_provider
+                self.config, price_provider=self.solar_price_provider
             )
 
-        logger.info("Planner configured")
+        self.tariff_provider: TariffProvider = create_tariff_provider(
+            self.config.tariff
+        )
 
         self.message_listener = MessageListener(
             self.config, self.chargers, self.vehicles
@@ -129,6 +138,10 @@ class SmartCharger:
             self.solar_provider.update_production,
         ):
             ml.add_on_power_production_changed(cb)
+
+        ml.add_on_power_accumulated_hourly_changed(
+            self._on_accumulated_hourly_consumption_changed
+        )
 
     def _on_session_start(self, session: ChargingSession):
         """Handle new or updated sessions.
@@ -215,13 +228,87 @@ class SmartCharger:
     def _on_updated_power_consumption(self, power):
         logger.debug(f"Received power consumption: {power} watts")
         self.power_consumption = power
+        self.power_consumption_high = (
+            self.power_consumption > self.config.high_load_threshold
+        )
 
     def _on_power_production_changed(self, power: float):
         logger.debug(f"Received power production: {power} watts")
         self.power_production = power
 
-    async def charger_loop(self, check_interval_seconds: int = 10):
-        """Async loop that controls the chargers."""
+    def _on_accumulated_hourly_consumption_changed(self, power: float):
+        logger.debug(f"Received accumulated hourly consumption: {power} watts")
+        self.power_accumulated_hourly_consumption = power
+        self.power_accumulated_hourly_consumption_high = (
+            self.power_accumulated_hourly_consumption
+            > self.config.high_hourly_energy_threshold
+        )
+
+    def _adjust_charging_current(
+        self, session: ChargingSession, charger: BaseCharger
+    ) -> None:
+        """Adjust charging current based on effective price with rate limiting.
+
+        Only adjusts current if enough time has passed since last change
+        (config.solar_charge_interval_minutes).
+        """
+        now = datetime.datetime.now()
+        interval = datetime.timedelta(minutes=self.config.solar_charge_interval_minutes)
+
+        if session.last_current_change is None:
+            session.last_current_change = now
+
+        if now - session.last_current_change < interval:
+            logger.debug(
+                "Skipping current adjustment - interval not reached. "
+                "Last change: %s, interval: %d minutes",
+                session.last_current_change,
+                self.config.solar_charge_interval_minutes,
+            )
+            return
+
+        effective_price = self.solar_price_provider.get_effective_price_now()
+        max_price = self.config.solar_max_effective_price
+
+        logger.info(
+            "Checking current adjustment: effective_price=%.3f, max_price=%.3f",
+            effective_price,
+            max_price,
+        )
+
+        if effective_price < max_price:
+            ideal_current = 16
+            logger.info(
+                "Effective price %.3f < %.3f - increasing to %dA (solar is cheap)",
+                effective_price,
+                max_price,
+                ideal_current,
+            )
+        else:
+            ideal_current = self.config.solar_min_current_amps
+            logger.info(
+                "Effective price %.3f >= %.3f - decreasing to %dA (solar not cheap enough)",
+                effective_price,
+                max_price,
+                ideal_current,
+            )
+
+        if charger.current != ideal_current:
+            logger.info(
+                "Changing charging current from %dA to %dA",
+                charger.current,
+                ideal_current,
+            )
+            charger.set_current(ideal_current)
+            session.last_current_change = now
+            session.current_amps = ideal_current
+
+    async def charger_loop(self, check_interval_seconds: int = 10) -> None:
+        """
+        Async loop that starts/stops charging based on the current session plans and solar surplus.
+        :param check_interval_seconds: is the interval in seconds between each check of the sessions and plans. Default is 10 seconds.
+        :return: None
+        """
         logger.info("Starting async charger loop")
         try:
             while True:
@@ -259,6 +346,7 @@ class SmartCharger:
                             plan.active_step = solar_step
                             self._on_charge_start(session, solar_step)
 
+                    # Start charging
                     if charging_step and not charger.charging:
                         logger.info(
                             f"Starting charging, current {charging_step.current}"
@@ -266,6 +354,8 @@ class SmartCharger:
                         charger.charging = True
                         plan.active_step = charging_step
                         self._on_charge_start(session, charging_step)
+
+                    # Change charging step
                     elif charging_step and charging_step.id != plan.active_step.id:
                         logger.info(
                             f"Changing charging step, current {charging_step.current}"
@@ -275,6 +365,8 @@ class SmartCharger:
                         self._on_changed_charging_step(
                             session, previous_charging_step, charging_step
                         )
+
+                    # Stop charging
                     elif not charging_step and charger and charger.charging:
                         # Only stop if not a solar surplus charging step
                         if plan.active_step and plan.active_step.solar_priority:
@@ -291,25 +383,41 @@ class SmartCharger:
                             plan.active_step = None
                             self._on_charge_stop(session)
 
+                    # Dynamic current adjustment based on effective price (solar-aware)
+                    # Rate-limited to solar_charge_interval_minutes
+                    if (
+                        charger.charging
+                        and self.solar_price_provider
+                        and session.vehicle
+                        and session.vehicle.connected
+                    ):
+                        self._adjust_charging_current(session, charger)
+
                 await asyncio.sleep(check_interval_seconds)
         except asyncio.CancelledError:
             logger.info("charger loop cancelled")
             raise
 
-    async def send_status_loop(self, check_interval_seconds: int = 10):
+    async def send_status_loop(self, check_interval_seconds: int = 10) -> None:
+        """
+        Async loop that sends status updates to MQTT.
+        :param check_interval_seconds: is the interval in seconds between each status update. Default is 10 seconds.
+        :return: None
+        """
         logger.info("Starting async send status loop")
         try:
             while True:
-                tariff = self.get_tariff()
-                power_consumption_high = (
-                    self.power_consumption > self.config.high_load_threshold
-                )
+                tariff = self.tariff_provider.is_high_tariff()
                 logger.debug(
-                    f"Tariff enabled {tariff}, Power consumption high: {power_consumption_high}"
+                    f"Tariff enabled {tariff}, Power consumption high: {self.power_consumption_high}"
                 )
                 self.message_sender.publish(self.config.tariff.topic, tariff)
                 self.message_sender.publish(
-                    self.config.high_load_topic, power_consumption_high
+                    self.config.high_load_topic, self.power_consumption_high
+                )
+                self.message_sender.publish(
+                    self.config.high_hourly_energy_topic,
+                    self.power_accumulated_hourly_consumption_high,
                 )
 
                 for session in self.session_manager.current_sessions:
@@ -342,13 +450,6 @@ class SmartCharger:
         except asyncio.CancelledError:
             logger.info("send status loop cancelled")
             raise
-
-    @staticmethod
-    def get_tariff():
-        timestamp = datetime.datetime.now()
-        if timestamp.month in [1, 2, 3, 11, 12] and 7 <= timestamp.hour < 21:
-            return True
-        return False
 
     async def _run_async_tasks(self):
         session_task = asyncio.create_task(

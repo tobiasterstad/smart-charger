@@ -37,6 +37,7 @@ class MessageListener:
         self._on_soc_changed_listeners: list[Callable[[VehicleStatus], None]] = []
         self._on_power_consumption_changed: list[Callable[[float], None]] = []
         self._on_power_production_changed: list[Callable[[float], None]] = []
+        self._on_energy_accumulated_hourly_changed: list[Callable[[float], None]] = []
 
     def add_on_connected_charger_listener(
         self, callback: Callable[[BaseCharger], None]
@@ -67,6 +68,11 @@ class MessageListener:
         self, callback: Callable[[float], None]
     ) -> None:
         self._on_power_production_changed.append(callback)
+
+    def add_on_power_accumulated_hourly_changed(
+        self, callback: Callable[[float], None]
+    ) -> None:
+        self._on_energy_accumulated_hourly_changed.append(callback)
 
     def connect_mqtt(self):
         self._reconnect_delay = RECONNECT_DELAY_SECONDS
@@ -111,6 +117,17 @@ class MessageListener:
             logger.error(f"Failed to reconnect: {e}")
             self._schedule_reconnect()
 
+    def _handle_float_message(
+        self,
+        msg: mqtt_client.MQTTMessage,
+        listener_list: list[Callable[[float], None]],
+    ) -> None:
+        try:
+            value = float(msg.payload.decode())
+            self._trigger_listeners(listener_list, value)
+        except ValueError:
+            logger.error(f"Invalid float payload: {msg.payload}")
+
     def subscribe(self, client: mqtt_client.Client):
         def on_message(client, userdata, msg):
             logger.info(f"Received `{msg.payload.decode()}` from `{msg.topic}` topic")
@@ -150,13 +167,15 @@ class MessageListener:
                 elif msg.topic == vehicle.soc_topic:
                     try:
                         vehicle_status.soc = int(msg.payload.decode())
-                        logger.debug(
-                            f"Updated {vehicle.name} SOC to {vehicle_status.soc}"
+                        vehicle_soc_reached = (
+                            (vehicle_status.soc >= vehicle.target_soc)
+                            if vehicle.target_soc
+                            else False
                         )
                         self._trigger_listeners(
                             self._on_soc_changed_listeners, vehicle_status
                         )
-                        if vehicle_status.soc >= vehicle.target_soc:
+                        if vehicle_soc_reached:
                             self._trigger_listeners(
                                 self._on_target_reached_listeners, vehicle_status
                             )
@@ -167,19 +186,15 @@ class MessageListener:
                         )
 
             if msg.topic == self.config.power_consumption_topic:
-                try:
-                    power = float(msg.payload.decode())
-                    self._trigger_listeners(self._on_power_consumption_changed, power)
-                except ValueError:
-                    logger.error(f"Invalid power payload: {msg.payload}")
+                self._handle_float_message(msg, self._on_power_consumption_changed)
 
             if msg.topic == self.config.power_production_topic:
-                try:
-                    power = float(msg.payload.decode())
-                    logger.info(f"Received production: {power} watts")
-                    self._trigger_listeners(self._on_power_production_changed, power)
-                except ValueError:
-                    logger.error(f"Invalid power payload: {msg.payload}")
+                self._handle_float_message(msg, self._on_power_production_changed)
+
+            if msg.topic == self.config.power_accumulated_hourly_topic:
+                self._handle_float_message(
+                    msg, self._on_energy_accumulated_hourly_changed
+                )
 
         def _decode_bool(msg) -> bool:
             return msg.payload.decode().lower() in ["true", "1", "yes"]
@@ -197,6 +212,7 @@ class MessageListener:
 
         client.subscribe(self.config.power_consumption_topic)
         client.subscribe(self.config.power_production_topic)
+        client.subscribe(self.config.power_accumulated_hourly_topic)
         client.on_message = on_message
 
     @staticmethod

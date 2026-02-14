@@ -113,9 +113,7 @@ class TestSolarPriceProvider:
         # Use a profile with no solar production at noon
         solar_provider._default_profile = {i: 0 for i in range(24)}
 
-        provider = SolarPriceProvider(
-            mock_tibber_provider, solar_provider, min_excess_watts=1000
-        )
+        provider = SolarPriceProvider(mock_tibber_provider, solar_provider)
 
         dt = datetime.datetime(2024, 6, 15, 12, 0, 0)
         price = provider.price_at(dt)
@@ -126,42 +124,25 @@ class TestSolarPriceProvider:
     def test_price_at_with_solar_below_threshold(
         self, mock_tibber_provider, solar_provider
     ):
-        # Use a profile with low solar production (below min_excess_watts)
+        # Solar benefit is now applied at ALL levels (even low production)
         solar_provider._default_profile = {i: 500 for i in range(24)}
 
-        provider = SolarPriceProvider(
-            mock_tibber_provider, solar_provider, min_excess_watts=1000
-        )
+        provider = SolarPriceProvider(mock_tibber_provider, solar_provider)
 
         dt = datetime.datetime(2024, 6, 15, 10, 0, 0)
         price = provider.price_at(dt)
 
-        assert price == 1.0
+        # 500W = 0.5 kWh, benefit = 0.5 * 1.0 = 0.5
+        # Effective price = 1.0 - 0.5 = 0.5
+        assert price == 0.5
         mock_tibber_provider.price_at.assert_called_once_with(dt)
-
-    def test_price_at_with_solar_below_threshold(
-        self, mock_tibber_provider, solar_provider
-    ):
-        # Use a profile with low solar production (below min_excess_watts)
-        solar_provider._default_profile = {i: 500 for i in range(24)}
-
-        provider = SolarPriceProvider(
-            mock_tibber_provider, solar_provider, min_excess_watts=1000
-        )
-
-        dt = datetime.datetime(2024, 6, 15, 10, 0, 0)
-        price = provider.price_at(dt)
-
-        assert price == 1.0
 
     def test_price_at_with_solar_above_threshold(
         self, mock_tibber_provider, solar_provider
     ):
         solar_provider.update_production(5000)
 
-        provider = SolarPriceProvider(
-            mock_tibber_provider, solar_provider, min_excess_watts=1000
-        )
+        provider = SolarPriceProvider(mock_tibber_provider, solar_provider)
 
         dt = datetime.datetime(2024, 6, 15, 10, 0, 0)  # 3000W expected production
         price = provider.price_at(dt)
@@ -172,9 +153,7 @@ class TestSolarPriceProvider:
     def test_price_at_minimum_zero(self, mock_tibber_provider, solar_provider):
         mock_tibber_provider.price_at.return_value = 0.5
 
-        provider = SolarPriceProvider(
-            mock_tibber_provider, solar_provider, min_excess_watts=1000
-        )
+        provider = SolarPriceProvider(mock_tibber_provider, solar_provider)
 
         dt = datetime.datetime(2024, 6, 15, 10, 0, 0)  # 3000W expected production
         price = provider.price_at(dt)
@@ -193,22 +172,16 @@ class TestSolarPriceProvider:
     def test_is_solar_available_true(self, mock_tibber_provider):
         solar_provider = MQTTSolarProvider()
         solar_provider.update_production(5000)
-        solar_provider.update_consumption(2000)
 
-        provider = SolarPriceProvider(
-            mock_tibber_provider, solar_provider, min_excess_watts=1000
-        )
+        provider = SolarPriceProvider(mock_tibber_provider, solar_provider)
 
         assert provider.is_solar_available() is True
 
     def test_is_solar_available_false(self, mock_tibber_provider):
         solar_provider = MQTTSolarProvider()
-        solar_provider.update_production(2000)
-        solar_provider.update_consumption(5000)
+        solar_provider.update_production(0)
 
-        provider = SolarPriceProvider(
-            mock_tibber_provider, solar_provider, min_excess_watts=1000
-        )
+        provider = SolarPriceProvider(mock_tibber_provider, solar_provider)
 
         assert provider.is_solar_available() is False
 
@@ -244,9 +217,7 @@ class TestSolarPriceProvider:
 
         mock_tibber_provider.price_at.return_value = 2.0  # 2 SEK/kWh
 
-        provider = SolarPriceProvider(
-            mock_tibber_provider, solar_provider, min_excess_watts=1000
-        )
+        provider = SolarPriceProvider(mock_tibber_provider, solar_provider)
 
         dt = datetime.datetime(2024, 6, 15, 10, 0, 0)
         price = provider.price_at(dt)
@@ -288,9 +259,7 @@ class TestSolarPriceProvider:
 
         mock_tibber_provider.price_at.return_value = 1.0
 
-        provider = SolarPriceProvider(
-            mock_tibber_provider, solar_provider, min_excess_watts=1000
-        )
+        provider = SolarPriceProvider(mock_tibber_provider, solar_provider)
 
         # Morning (low solar) - should use profile from init
         dt_morning = datetime.datetime(2024, 6, 15, 8, 0, 0)

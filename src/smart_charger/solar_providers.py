@@ -21,6 +21,16 @@ class SolarProvider(Protocol):
         """Return expected solar production in watts for a specific hour of day (0-23)."""
         ...
 
+    @property
+    def current_production_watts(self) -> float:
+        """Return current solar production in watts."""
+        ...
+
+    @property
+    def current_excess_watts(self) -> float:
+        """Return current solar excess (production - consumption) in watts."""
+        ...
+
 
 class MQTTSolarProvider:
     """Solar provider that receives production data from MQTT messages.
@@ -101,17 +111,19 @@ class SolarPriceProvider:
 
     The provider tracks real-time production/consumption from MQTT and uses
     a typical production profile for planning future hours.
+
+    Solar benefit is always applied proportionally based on expected solar production,
+    regardless of amount. This allows charging even when solar alone isn't enough
+    to cover all charging needs.
     """
 
     def __init__(
         self,
         tibber_price_provider,
         solar_provider: Optional[SolarProvider] = None,
-        min_excess_watts: float = 1000,
     ):
         self.tibber_provider = tibber_price_provider
         self.solar_provider = solar_provider or MQTTSolarProvider()
-        self.min_excess_watts = min_excess_watts
         self.voltage = 230
 
     def price_at(self, dt: datetime.datetime) -> float:
@@ -121,27 +133,40 @@ class SolarPriceProvider:
         the price is reduced based on how much solar energy can offset grid usage.
         """
         electricity_price = self.tibber_provider.price_at(dt)
-        solar_benefit = self._calculate_solar_benefit(dt)
+        solar_benefit = self._calculate_solar_benefit(dt, electricity_price)
         effective_price = electricity_price - solar_benefit
         return max(0.0, effective_price)
 
-    def _calculate_solar_benefit(self, dt: datetime.datetime) -> float:
+    def _calculate_solar_benefit(
+        self, dt: datetime.datetime, electricity_price: float
+    ) -> float:
         """Calculate the monetary benefit of solar production for a given hour.
 
         Returns the reduction in price per kWh based on expected solar production.
+        Solar benefit is applied proportionally at all production levels.
         """
         solar_watts = self.solar_provider.get_production(dt)
-
-        if solar_watts < self.min_excess_watts:
+        if solar_watts <= 0:
             return 0.0
 
         solar_kwh = solar_watts / 1000
-
-        electricity_price = self.tibber_provider.price_at(dt)
-
         benefit = solar_kwh * electricity_price
-
         return benefit
+
+    def get_effective_price_now(self) -> float:
+        """Get the current effective price based on real-time solar production."""
+        now = datetime.datetime.now()
+        electricity_price = self.tibber_provider.price_at(now)
+        solar_watts = self.solar_provider.current_production_watts
+        if solar_watts <= 0:
+            return electricity_price
+        solar_kwh = solar_watts / 1000
+        benefit = solar_kwh * electricity_price
+        return max(0.0, electricity_price - benefit)
+
+    def get_grid_price_now(self) -> float:
+        """Get the current grid electricity price without solar benefit."""
+        return self.tibber_provider.price_at(datetime.datetime.now())
 
     def get_solar_excess(self) -> float:
         """Get current solar excess in watts from real-time MQTT data."""
@@ -149,4 +174,4 @@ class SolarPriceProvider:
 
     def is_solar_available(self) -> bool:
         """Check if currently there's meaningful solar production."""
-        return self.solar_provider.current_excess_watts >= self.min_excess_watts
+        return self.solar_provider.current_production_watts > 0

@@ -26,6 +26,8 @@ class ChargingSession(BaseModel):
     charger: Optional[BaseCharger] = None
     plan: Optional[ChargingPlan] = None
     target_soc: Optional[int] = None
+    last_current_change: Optional[datetime.datetime] = None
+    current_amps: int = 0
 
 
 class SessionManager:

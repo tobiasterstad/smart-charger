@@ -229,3 +229,57 @@ uv run mqtt-tool --connect-vehicle leaf:true
 ## Connect charger 
 
 uv run mqtt-tool --connect-charger gpn018087:true
+
+---
+
+## Solar-Aware Charging Requirements
+
+### Overview
+
+The smart charger supports solar-aware charging that combines solar production with grid electricity prices to determine when it's cheapest to charge. The system calculates an "effective price" that accounts for solar energy value.
+
+### How It Works
+
+**Effective Price Calculation:**
+- `effective_price = grid_price - solar_benefit`
+- `solar_benefit = (solar_watts / 1000) * grid_price` (kWh of solar × grid price)
+- Solar benefit applies at **all production levels**, not just when there's excess
+
+**Example:**
+| Hour | Grid Price | Solar Prod | Solar Benefit | Effective Price |
+|------|------------|------------|---------------|-----------------|
+| 10:00 | 0.30 EUR/kWh  | 2800W | 0.84 | -0.54 (free) |
+| 08:00 | 0.25 EUR/kWh | 1200W | 0.30 | -0.05 (near free) |
+| 17:00 | 0.22 EUR/kWh | 800W | 0.18 | 0.04 |
+| 06:00 | 0.18 EUR/kWh | 100W | 0.02 | 0.16 |
+
+### Current Adjustment with Rate Limiting
+
+The charger adjusts current based on effective price, but limits how often changes can occur to protect the charger hardware.
+
+**Behavior:**
+- **Every 15 minutes** (configurable), the system checks if current should be adjusted
+- If effective price < `solar_max_effective_price` (default 0.15 EUR/kWh): charge at **16A** (max)
+- If effective price >= `solar_max_effective_price`: charge at **6A** (min)
+- If less than 15 minutes since last change: **maintain current**
+
+This protects against rapid cycling when clouds pass over - if solar drops suddenly, the charger waits up to 15 minutes before adjusting down.
+
+### Configuration Options
+
+New configuration options in `config.py`:
+
+```python
+solar_surplus_charging: bool = True          # Enable solar surplus charging
+solar_min_excess_watts: float = 1500         # Min excess for legacy surplus mode
+solar_max_effective_price: float = 0.15      # Max effective price for max current (EUR/kWh)
+solar_min_current_amps: int = 6              # Minimum current when solar not cheap enough
+solar_charge_interval_minutes: int = 15      # Min time between current changes
+```
+
+### Key Benefits
+
+1. **Charge during daylight** even when solar alone isn't enough - the effective price accounts for any solar contribution
+2. **Automatic optimization** - no manual intervention needed for price/solar tradeoffs
+3. **Hardware protection** - rate limiting prevents excessive current changes
+4. **Flexible thresholds** - all settings are configurable for different setups
