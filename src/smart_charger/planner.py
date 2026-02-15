@@ -26,20 +26,12 @@ class ChargingStep(BaseModel):
     stop_time: Optional[datetime.datetime] = None
     current: int = Field(default=16, description="Charging current in Amperes")
     description: str
-    solar_priority: bool = False
-    solar_max_current: Optional[int] = None
     mean_price: Optional[float] = None
-    grid_price: Optional[float] = None
 
     @property
     def energy_kwh(self) -> float:
         hours = (self.stop_time - self.start_time).total_seconds() / 3600
-        current = (
-            self.solar_max_current
-            if self.solar_priority and self.solar_max_current
-            else self.current
-        )
-        energy_kwh = (230 * current / 1000) * hours
+        energy_kwh = (230 * self.current / 1000) * hours
         return energy_kwh
 
 
@@ -58,15 +50,12 @@ class ChargingPlan(BaseModel):
         return sum(step.energy_kwh for step in self.steps)
 
     def get_charging_step(
-        self, timestamp: Optional[datetime.datetime] = None, solar_priority=False
+        self, timestamp: Optional[datetime.datetime] = None
     ) -> Optional[ChargingStep]:
         if not timestamp:
             timestamp = get_now()
         for step in self.steps:
-            if (
-                step.start_time <= timestamp <= step.stop_time
-                and step.solar_priority == solar_priority
-            ):
+            if step.start_time <= timestamp <= step.stop_time:
                 return step
         return None
 

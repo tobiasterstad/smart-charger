@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import datetime
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from enum import Enum
@@ -88,6 +89,8 @@ class SmartCharger:
         self.power_production: float = 0.0
         self.power_accumulated_hourly_consumption: float = 0.0
         self.power_accumulated_hourly_consumption_high: bool = False
+        self.effect_tariff_stopped_hour: Optional[int] = None
+        self._solar_limiter = Limiter(Rate(1, Duration.SECOND * 30))
         self.session_manager = SessionManager()
 
         if self.config.planner == PlannerType.SIMPLE:
@@ -246,6 +249,108 @@ class SmartCharger:
             > self.config.high_hourly_energy_threshold
         )
 
+    def _handle_effect_tariff(self, session: ChargingSession) -> None:
+        """Handle hourly energy threshold: stop when exceeded, resume at next hour."""
+        charger = session.charger
+        current_hour = datetime.datetime.now().hour
+
+        if (
+            self.power_accumulated_hourly_consumption_high
+            and charger.charging
+            and self.effect_tariff_stopped_hour != current_hour
+        ):
+            logger.warning(
+                "Hourly energy threshold exceeded (%.1f kWh > %.1f kWh) - stopping charging",
+                self.power_accumulated_hourly_consumption,
+                self.config.high_hourly_energy_threshold,
+            )
+            charger.charging = False
+            session.plan.active_step = None
+            self._on_charge_stop(session)
+            self.effect_tariff_stopped_hour = current_hour
+            return
+
+        if (
+            self.effect_tariff_stopped_hour is not None
+            and self.effect_tariff_stopped_hour != current_hour
+        ):
+            logger.info(
+                "New hour (%d) - clearing effect tariff stop, was stopped at hour %d",
+                current_hour,
+                self.effect_tariff_stopped_hour,
+            )
+            self.effect_tariff_stopped_hour = None
+
+        if (
+            self.power_accumulated_hourly_consumption_high
+            and not charger.charging
+            and session.get_current_charging_step()
+        ):
+            logger.warning(
+                "Hourly energy threshold exceeded - not starting charging until next hour"
+            )
+            return
+
+    def _handle_solar_charging(self, session: ChargingSession) -> None:
+        """Handle solar surplus charging."""
+        charger = session.charger
+        charging_step = session.get_current_charging_step()
+
+        if not self._solar_limiter.try_acquire("solar_charging", blocking=False):
+            return
+
+        prediction = self.solar_charger_controller.get_solar_charge_prediction(
+            session, charging_step
+        )
+
+        if prediction.available:
+            logger.info(
+                f"Solar charging available - current: {prediction.current}, effective price: {prediction.effective_price}"
+            )
+            if not charger.charging:
+                charger.start_charging()
+            if charger.current != prediction.current:
+                charger.set_current(prediction.current)
+            session.solar_charging = True
+        else:
+            logger.debug("Solar charging not available - not starting solar charging")
+            if charger.charging:
+                charger.stop_charging()
+            session.solar_charging = False
+
+    def _handle_charging_control(self, session: ChargingSession) -> None:
+        """Handle charging start/stop/change based on charging step and solar status."""
+        charger = session.charger
+        charging_step = session.get_current_charging_step()
+
+        if charging_step and not charger.charging:
+            logger.info(f"Starting charging, current {charging_step.current}")
+            session.plan.active_step = charging_step
+            self._on_charge_start(session, charging_step)
+
+        elif charging_step and charging_step.id != session.plan.active_step.id:
+            logger.info(f"Changing charging step, current {charging_step.current}")
+            previous_charging_step = session.plan.active_step
+            session.plan.active_step = charging_step
+            self._on_changed_charging_step(
+                session, previous_charging_step, charging_step
+            )
+
+        elif (
+            not charging_step
+            and charger
+            and charger.charging
+            and not session.solar_charging
+        ):
+            logger.info("Stop charging")
+            charger.charging = False
+            session.plan.active_step = None
+            self._on_charge_stop(session)
+            logger.info("Stop charging")
+            charger.charging = False
+            session.plan.active_step = None
+            self._on_charge_stop(session)
+
     async def charger_loop(self, check_interval_seconds: int = 10) -> None:
         """
         Async loop that starts/stops charging based on the current session plans and solar surplus.
@@ -253,75 +358,17 @@ class SmartCharger:
         :return: None
         """
         logger.info("Starting async charger loop")
-        limiter = Limiter(Rate(1, Duration.SECOND * 30))
+
         try:
             while True:
-                # Check charging sessions
                 for session in self.session_manager.current_sessions:
-                    charger = session.charger
-                    plan = session.plan
-                    charging_step = plan.get_charging_step() if plan else None
+                    if self.config.high_hourly_energy_threshold is not None:
+                        self._handle_effect_tariff(session)
 
-                    # Solar charging prediction is only relevant if no active charging step is planned, but solar surplus charging is enabled
-                    if not charging_step and limiter.try_acquire(
-                        "solar_charging", blocking=False
-                    ):
-                        prediction = (
-                            self.solar_charger_controller.get_solar_charge_prediction(
-                                session, charging_step
-                            )
-                        )
-                        if prediction.available:
-                            logger.info(
-                                f"Solar charging available - current: {prediction.current}, effective price: {prediction.effective_price}"
-                            )
-                            # Solar charging is possible, used the surplus to charge the car.
-                            if not charger.charging:
-                                charger.start_charging()
-                            if charger.current != prediction.current:
-                                charger.set_current(prediction.current)
+                    if not session.get_current_charging_step():
+                        self._handle_solar_charging(session)
 
-                            session.solar_charging = True
-                        else:
-                            logger.debug(
-                                "Solar charging not available - not starting solar charging"
-                            )
-                            if charger.charging:
-                                charger.stop_charging()
-
-                            session.solar_charging = False
-
-                    # Start charging
-                    if charging_step and not charger.charging:
-                        logger.info(
-                            f"Starting charging, current {charging_step.current}"
-                        )
-                        charger.charging = True
-                        plan.active_step = charging_step
-                        self._on_charge_start(session, charging_step)
-
-                    # Change charging step
-                    elif charging_step and charging_step.id != plan.active_step.id:
-                        logger.info(
-                            f"Changing charging step, current {charging_step.current}"
-                        )
-                        previous_charging_step = plan.active_step
-                        plan.active_step = charging_step
-                        self._on_changed_charging_step(
-                            session, previous_charging_step, charging_step
-                        )
-
-                    # Stop charging if no active charging step, except if solar charging is active
-                    elif (
-                        not charging_step
-                        and charger
-                        and charger.charging
-                        and not session.solar_charging
-                    ):
-                        logger.info("Stop charging")
-                        charger.charging = False
-                        plan.active_step = None
-                        self._on_charge_stop(session)
+                    self._handle_charging_control(session)
 
                 await asyncio.sleep(check_interval_seconds)
         except asyncio.CancelledError:

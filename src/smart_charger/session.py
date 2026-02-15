@@ -9,7 +9,7 @@ from typing import Optional, Callable, List
 from pydantic import BaseModel
 
 from smart_charger.chargers import BaseCharger
-from smart_charger.planner import ChargingPlan, VehicleStatus
+from smart_charger.planner import ChargingPlan, ChargingStep, VehicleStatus
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,10 @@ class ChargingSession(BaseModel):
     last_current_change: Optional[datetime.datetime] = None
     current_amps: int = 0
     solar_charging: bool = False
+
+    def get_current_charging_step(self) -> Optional[ChargingStep]:
+        """Get the current charging step from the plan."""
+        return self.plan.get_charging_step() if self.plan else None
 
 
 class SessionManager:
