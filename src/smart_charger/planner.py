@@ -382,9 +382,9 @@ class Candidate:
 class PriceAwarePlanner(BasePlanner):
     """Planner that selects cheapest hours between now and the prioritized night window.
 
-    - Accepts a `tariff_provider` implementing `price_at(datetime) -> float`.
+    - Accepts a `price_provider` implementing `price_at(datetime) -> float`.
     - Calculates energy required and greedily selects cheapest hour blocks until
-      required energy is satisfied (prefers night hours by small bias).
+      required energy is satisfied.
     - Builds contiguous ChargingStep blocks grouped by hour and current.
     """
 
@@ -412,119 +412,16 @@ class PriceAwarePlanner(BasePlanner):
             )
 
         now = get_now()
-        # Choose night window same as SimpleHourPlanner
-        if now.hour < 7:
-            night_start = self._get_timestamp_from_hour("00:00", increment_days=0)
-            night_end = self._get_timestamp_from_hour("07:00", increment_days=0)
-        else:
-            night_start = self._get_timestamp_from_hour("00:00", increment_days=1)
-            night_end = self._get_timestamp_from_hour("07:00", increment_days=1)
+        night_start, night_end = self._get_night_window(now)
 
-        # build list of candidate hour start datetime from now (rounded up to next hour) until night_end
-        start_hour = now.replace(minute=0, second=0, microsecond=0)
-        if now.minute > 0 or now.second > 0 or now.microsecond > 0:
-            start_hour += datetime.timedelta(hours=1)
+        candidates = self._generate_candidates(night_start, night_end, now)
+        self._select_candidates(candidates, planned_energy_kwh, night_start, night_end)
 
-        candidates: List[Candidate] = []
-        cursor = start_hour
-        while cursor < night_end:
-            is_night = night_start <= cursor < night_end
-            current = 16 if is_night else 6
-            candidates.append(Candidate(dt=cursor, is_night=is_night, current=current))
-            cursor += datetime.timedelta(hours=1)
-
-        # enrich candidates with price and score in-place, then sort the candidates list by score
-        for cand in candidates:
-            price = (
-                self.price_provider.price_at(cand.dt) if self.price_provider else 0.0
-            )
-            cand.price = price
-            cand.score = price - (0.0001 if cand.is_night else 0.0)
-
-        # sort candidates by candidate.score (cheap first). Put unknown scores at the end.
-        candidates.sort(
-            key=lambda c: (c.score if c.score is not None else float("inf"))
-        )
-
-        accumulated_energy = 0.0
-        # select cheapest candidates by marking them chosen
-        for cand in candidates:
-            hour_energy = self._get_energy(cand.current, 1)
-            cand.chosen = True
-            accumulated_energy += hour_energy
-            if accumulated_energy >= planned_energy_kwh:
-                break
-
-        if accumulated_energy < planned_energy_kwh:
-            # pick remaining hours in chronological order excluding already chosen
-            for cand in candidates:
-                if cand.chosen:
-                    continue
-                current = 16 if (night_start <= cand.dt < night_end) else 6
-                hour_energy = self._get_energy(current, 1)
-                cand.chosen = True
-                accumulated_energy += hour_energy
-                if accumulated_energy >= planned_energy_kwh:
-                    break
-
-        # build chosen_hours from candidates and group adjacent hours with same current into steps
         chosen_hours = [c for c in candidates if c.chosen]
         chosen_hours.sort(key=lambda c: c.dt)
-        logger.warning(f"Chosen hours sorted: {chosen_hours}")
+        logger.debug(f"Chosen hours sorted: {chosen_hours}")
 
-        # chosen_hours: List[Tuple[datetime.datetime, int]] = [
-        #    (c.dt, c.current) for c in candidates if c.chosen
-        # ]
-        ## ensure chronological order
-        # chosen_hours.sort(key=lambda t: t[0])
-        steps: List[ChargingStep] = []
-        if chosen_hours:
-            block_start = chosen_hours[0].dt
-            block_current = chosen_hours[0].current
-            block_prices: List[float] = (
-                [chosen_hours[0].price] if chosen_hours[0].price is not None else []
-            )
-            block_end = block_start + datetime.timedelta(hours=1)
-
-            for h in chosen_hours[1:]:
-                if h.current == block_current and h.dt == block_end:
-                    # extend block
-                    if h.price is not None:
-                        block_prices.append(h.price)
-                    block_end += datetime.timedelta(hours=1)
-                else:
-                    block_price = (
-                        sum(block_prices) / len(block_prices) if block_prices else None
-                    )
-                    steps.append(
-                        ChargingStep(
-                            id=str(uuid.uuid4()),
-                            start_time=block_start,
-                            stop_time=block_end,
-                            current=block_current,
-                            description="Price-aware block",
-                            mean_price=block_price,
-                        )
-                    )
-                    block_start = h.dt
-                    block_current = h.current
-                    block_prices = [h.price] if h.price is not None else []
-                    block_end = h.dt + datetime.timedelta(hours=1)
-
-            # append last block
-            block_price = (
-                sum(block_prices) / len(block_prices) if block_prices else None
-            )
-            steps.append(
-                ChargingStep(
-                    id=str(uuid.uuid4()),
-                    start_time=block_start,
-                    stop_time=block_end,
-                    current=block_current,
-                    description="Price-aware block",
-                    mean_price=block_price,
-                )
-            )
+        steps = self._group_candidates_into_steps(chosen_hours)
 
         plan = ChargingPlan(
             vehicle_id=vehicle.id,
@@ -542,3 +439,176 @@ class PriceAwarePlanner(BasePlanner):
             plan.total_energy_kwh,
         )
         return plan
+
+    def _get_night_window(
+        self, now: datetime.datetime
+    ) -> tuple[datetime.datetime, datetime.datetime]:
+        """Get the night window start and end times.
+
+        Args:
+            now: The current datetime used to determine which night window to use.
+                If before 7am, uses tonight's window (same day).
+                If after 7am, uses tomorrow night's window (next day).
+
+        Returns:
+            A tuple of (night_start, night_end) datetimes.
+            Night window is 00:00 to 07:00.
+        """
+        if now.hour < 7:
+            return (
+                self._get_timestamp_from_hour("00:00", increment_days=0),
+                self._get_timestamp_from_hour("07:00", increment_days=0),
+            )
+        return (
+            self._get_timestamp_from_hour("00:00", increment_days=1),
+            self._get_timestamp_from_hour("07:00", increment_days=1),
+        )
+
+    def _generate_candidates(
+        self,
+        night_start: datetime.datetime,
+        night_end: datetime.datetime,
+        now: datetime.datetime,
+    ) -> List[Candidate]:
+        """Generate candidate charging hours sorted by price.
+
+        Creates hourly candidate slots from the next hour until the night window ends.
+        Each candidate is enriched with electricity price and sorted by price (ascending).
+
+        Args:
+            night_start: Start of the night window (00:00).
+            night_end: End of the night window (07:00).
+            now: Current datetime used to determine the start hour.
+
+        Returns:
+            List of Candidate objects sorted by score (price), cheapest first.
+            Each candidate has price and score populated.
+        """
+        start_hour = now.replace(minute=0, second=0, microsecond=0)
+        if now.minute > 0 or now.second > 0 or now.microsecond > 0:
+            start_hour += datetime.timedelta(hours=1)
+
+        candidates: List[Candidate] = []
+        cursor = start_hour
+        while cursor < night_end:
+            is_night = night_start <= cursor < night_end
+            current = 16 if is_night else 6
+            candidates.append(Candidate(dt=cursor, is_night=is_night, current=current))
+            cursor += datetime.timedelta(hours=1)
+
+        for cand in candidates:
+            price = (
+                self.price_provider.price_at(cand.dt) if self.price_provider else 0.0
+            )
+            cand.price = price
+            cand.score = price
+
+        candidates.sort(
+            key=lambda c: (c.score if c.score is not None else float("inf"))
+        )
+        return candidates
+
+    def _select_candidates(
+        self,
+        candidates: List[Candidate],
+        planned_energy_kwh: float,
+        night_start: datetime.datetime,
+        night_end: datetime.datetime,
+    ) -> None:
+        """Select candidates to fulfill the required energy.
+
+        First pass: selects cheapest candidates (already sorted by price) until
+        the required energy is met.
+
+        Second pass: if more energy is needed, selects remaining candidates in
+        chronological order (preferring night hours with 16A current).
+
+        Args:
+            candidates: List of Candidate objects. Modified in place by setting
+                chosen=True on selected candidates.
+            planned_energy_kwh: Total energy needed in kWh.
+            night_start: Start of night window for determining 16A vs 6A current.
+            night_end: End of night window for determining 16A vs 6A current.
+        """
+        accumulated_energy = 0.0
+        for cand in candidates:
+            hour_energy = self._get_energy(cand.current, 1)
+            cand.chosen = True
+            accumulated_energy += hour_energy
+            if accumulated_energy >= planned_energy_kwh:
+                break
+
+        if accumulated_energy < planned_energy_kwh:
+            for cand in candidates:
+                if cand.chosen:
+                    continue
+                current = 16 if (night_start <= cand.dt < night_end) else 6
+                hour_energy = self._get_energy(current, 1)
+                cand.chosen = True
+                accumulated_energy += hour_energy
+                if accumulated_energy >= planned_energy_kwh:
+                    break
+
+    @staticmethod
+    def _group_candidates_into_steps(
+        chosen_hours: List[Candidate],
+    ) -> List[ChargingStep]:
+        """Group chosen candidates into contiguous charging steps.
+
+        Adjacent hours with the same current are combined into a single
+        ChargingStep. The mean price is calculated for each step.
+
+        Args:
+            chosen_hours: List of Candidate objects that were selected for charging.
+                Must be sorted in chronological order.
+
+        Returns:
+            List of ChargingStep objects representing contiguous charging blocks.
+        """
+        steps: List[ChargingStep] = []
+        if not chosen_hours:
+            return steps
+
+        block_start = chosen_hours[0].dt
+        block_current = chosen_hours[0].current
+        block_prices: List[float] = (
+            [chosen_hours[0].price] if chosen_hours[0].price is not None else []
+        )
+        block_end = block_start + datetime.timedelta(hours=1)
+
+        for h in chosen_hours[1:]:
+            if h.current == block_current and h.dt == block_end:
+                if h.price is not None:
+                    block_prices.append(h.price)
+                block_end += datetime.timedelta(hours=1)
+            else:
+                block_price = (
+                    sum(block_prices) / len(block_prices) if block_prices else None
+                )
+                steps.append(
+                    ChargingStep(
+                        id=str(uuid.uuid4()),
+                        start_time=block_start,
+                        stop_time=block_end,
+                        current=block_current,
+                        description="Price-aware block",
+                        mean_price=block_price,
+                    )
+                )
+                block_start = h.dt
+                block_current = h.current
+                block_prices = [h.price] if h.price is not None else []
+                block_end = h.dt + datetime.timedelta(hours=1)
+
+        block_price = sum(block_prices) / len(block_prices) if block_prices else None
+        steps.append(
+            ChargingStep(
+                id=str(uuid.uuid4()),
+                start_time=block_start,
+                stop_time=block_end,
+                current=block_current,
+                description="Price-aware block",
+                mean_price=block_price,
+            )
+        )
+        return steps

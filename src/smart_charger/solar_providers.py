@@ -12,8 +12,15 @@ from smart_charger.config import ChargerConfiguration
 from smart_charger.planner import ChargingStep, BasePlanner
 from smart_charger.price_providers import PriceProvider
 from smart_charger.session import ChargingSession
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+class SolarChargePrediction(BaseModel):
+    available: bool
+    effective_price: float = 0.0
+    current: int = 0
 
 
 class SolarChargerController:
@@ -70,9 +77,9 @@ class SolarChargerController:
         effective_price = grid_price - (solar_kwh * grid_price / planned_energy_kwh)
         return max(0.0, effective_price)
 
-    def solar_charging_available(
+    def get_solar_charge_prediction(
         self, session: ChargingSession, step: ChargingStep
-    ) -> bool:
+    ) -> SolarChargePrediction:
         """Check if solar charging is available based on current production and if the
         relative price is below the price planned later in the charging session.
 
@@ -80,7 +87,7 @@ class SolarChargerController:
         to cover all needs, as long as it provides a meaningful benefit.
         """
         if self.power_production <= 0 or not session.plan:
-            return False
+            return SolarChargePrediction(available=False)
 
         # Current (A) = Energy (kWh) * 1000 / (Voltage (V) * Time (h))
         hours = 1
@@ -112,7 +119,7 @@ class SolarChargerController:
         logger.debug(f"Future prices: {json.dumps(future_prices, indent=2)}")
 
         if not future_prices:
-            return True
+            return SolarChargePrediction(available=False)
 
         min_future_price = min(future_prices)
         charging_available = effective_price < min_future_price
@@ -122,8 +129,12 @@ class SolarChargerController:
         )
 
         if charging_available:
-            logger.info("Solar charging is available and beneficial")
+            logger.debug("Solar charging is available and beneficial")
         else:
-            logger.info("Solar charging is not beneficial compared to future prices")
+            logger.debug("Solar charging is not beneficial compared to future prices")
 
-        return charging_available
+        return SolarChargePrediction(
+            available=charging_available,
+            effective_price=effective_price,
+            current=current,
+        )

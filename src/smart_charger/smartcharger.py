@@ -1,5 +1,4 @@
 import asyncio
-import datetime
 import logging
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
@@ -247,68 +246,6 @@ class SmartCharger:
             > self.config.high_hourly_energy_threshold
         )
 
-    def _adjust_charging_current(
-        self, session: ChargingSession, charger: BaseCharger
-    ) -> None:
-        """Adjust charging current based on effective price with rate limiting.
-
-        Only adjusts current if enough time has passed since last change
-        (config.solar_charge_interval_minutes).
-        """
-        now = datetime.datetime.now()
-        interval = datetime.timedelta(minutes=self.config.solar_charge_interval_minutes)
-
-        if session.last_current_change is None:
-            session.last_current_change = now
-
-        if now - session.last_current_change < interval:
-            logger.debug(
-                "Skipping current adjustment - interval not reached. "
-                "Last change: %s, interval: %d minutes",
-                session.last_current_change,
-                self.config.solar_charge_interval_minutes,
-            )
-            return
-
-        planned_energy_kwh = session.plan.energy_kwh if session.plan else None
-        effective_price = self.solar_charger_controller.get_effective_price(
-            planned_energy_kwh=planned_energy_kwh
-        )
-        max_price = self.config.solar_max_effective_price
-
-        logger.info(
-            "Checking current adjustment: effective_price=%.3f, max_price=%.3f",
-            effective_price,
-            max_price,
-        )
-
-        if effective_price < max_price:
-            ideal_current = 16
-            logger.info(
-                "Effective price %.3f < %.3f - increasing to %dA (solar is cheap)",
-                effective_price,
-                max_price,
-                ideal_current,
-            )
-        else:
-            ideal_current = self.config.solar_min_current_amps
-            logger.info(
-                "Effective price %.3f >= %.3f - decreasing to %dA (solar not cheap enough)",
-                effective_price,
-                max_price,
-                ideal_current,
-            )
-
-        if charger.current != ideal_current:
-            logger.info(
-                "Changing charging current from %dA to %dA",
-                charger.current,
-                ideal_current,
-            )
-            charger.set_current(ideal_current)
-            session.last_current_change = now
-            session.current_amps = ideal_current
-
     async def charger_loop(self, check_interval_seconds: int = 10) -> None:
         """
         Async loop that starts/stops charging based on the current session plans and solar surplus.
@@ -319,49 +256,40 @@ class SmartCharger:
         limiter = Limiter(Rate(1, Duration.SECOND * 30))
         try:
             while True:
-                if limiter.try_acquire("mytest", blocking=False):
-                    logger.info("hej")
-
                 # Check charging sessions
                 for session in self.session_manager.current_sessions:
                     charger = session.charger
                     plan = session.plan
                     charging_step = plan.get_charging_step() if plan else None
 
-                    if self.solar_charger_controller.solar_charging_available(
-                        session, charging_step
+                    # Solar charging prediction is only relevant if no active charging step is planned, but solar surplus charging is enabled
+                    if not charging_step and limiter.try_acquire(
+                        "solar_charging", blocking=False
                     ):
-                        logger.info(
-                            "Solar charging available - checking for opportunities"
+                        prediction = (
+                            self.solar_charger_controller.get_solar_charge_prediction(
+                                session, charging_step
+                            )
                         )
+                        if prediction.available:
+                            logger.info(
+                                f"Solar charging available - current: {prediction.current}, effective price: {prediction.effective_price}"
+                            )
+                            # Solar charging is possible, used the surplus to charge the car.
+                            if not charger.charging:
+                                charger.start_charging()
+                            if charger.current != prediction.current:
+                                charger.set_current(prediction.current)
 
-                    # # Check for solar surplus charging opportunity
-                    # if (
-                    #     self.config.solar_surplus_charging
-                    #     and not charger.charging
-                    #     and session.vehicle
-                    #     and session.vehicle.connected
-                    #     and charger.connected
-                    # ):
-                    #     solar_excess = self.solar_provider.current_excess_watts
-                    #     logger.info(
-                    #         f"Solar excess: {solar_excess}W, min required: {self.config.solar_min_excess_watts}W"
-                    #     )
-                    #     if solar_excess >= self.config.solar_min_excess_watts:
-                    #         logger.info(
-                    #             f"Starting solar surplus charging, excess {solar_excess}W >= {self.config.solar_min_excess_watts}W"
-                    #         )
-                    #         solar_step = ChargingStep(
-                    #             id=str(uuid.uuid4()),
-                    #             start_time=get_now(),
-                    #             current=6,
-                    #             description="Solar surplus charging",
-                    #             solar_priority=True,
-                    #             solar_max_current=6,
-                    #         )
-                    #         charger.charging = True
-                    #         plan.active_step = solar_step
-                    #         self._on_charge_start(session, solar_step)
+                            session.solar_charging = True
+                        else:
+                            logger.debug(
+                                "Solar charging not available - not starting solar charging"
+                            )
+                            if charger.charging:
+                                charger.stop_charging()
+
+                            session.solar_charging = False
 
                     # Start charging
                     if charging_step and not charger.charging:
@@ -383,22 +311,17 @@ class SmartCharger:
                             session, previous_charging_step, charging_step
                         )
 
-                    # Stop charging
-                    elif not charging_step and charger and charger.charging:
+                    # Stop charging if no active charging step, except if solar charging is active
+                    elif (
+                        not charging_step
+                        and charger
+                        and charger.charging
+                        and not session.solar_charging
+                    ):
                         logger.info("Stop charging")
                         charger.charging = False
                         plan.active_step = None
                         self._on_charge_stop(session)
-
-                    # Dynamic current adjustment based on effective price (solar-aware)
-                    # Rate-limited to solar_charge_interval_minutes
-                    if (
-                        charger.charging
-                        and self.solar_charger_controller
-                        and session.vehicle
-                        and session.vehicle.connected
-                    ):
-                        self._adjust_charging_current(session, charger)
 
                 await asyncio.sleep(check_interval_seconds)
         except asyncio.CancelledError:

@@ -28,6 +28,7 @@ class ChargingSession(BaseModel):
     target_soc: Optional[int] = None
     last_current_change: Optional[datetime.datetime] = None
     current_amps: int = 0
+    solar_charging: bool = False
 
 
 class SessionManager:
