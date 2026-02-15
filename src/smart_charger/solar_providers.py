@@ -1,177 +1,129 @@
-"""Solar-aware price provider that combines Tibber prices with solar production data."""
+"""Solar-aware charging controller."""
 
 from __future__ import annotations
 
 import datetime
+import json
 import logging
-from typing import Protocol, Optional
+import math
+from typing import Optional
 
+from smart_charger.config import ChargerConfiguration
+from smart_charger.planner import ChargingStep, BasePlanner
+from smart_charger.price_providers import PriceProvider
+from smart_charger.session import ChargingSession
 
 logger = logging.getLogger(__name__)
 
 
-class SolarProvider(Protocol):
-    """Protocol for solar production data providers."""
-
-    def get_production(self, dt: datetime.datetime) -> float:
-        """Return expected solar production in watts for the given hour."""
-        ...
-
-    def get_production_for_hour(self, hour: int) -> float:
-        """Return expected solar production in watts for a specific hour of day (0-23)."""
-        ...
-
-    @property
-    def current_production_watts(self) -> float:
-        """Return current solar production in watts."""
-        ...
-
-    @property
-    def current_excess_watts(self) -> float:
-        """Return current solar excess (production - consumption) in watts."""
-        ...
-
-
-class MQTTSolarProvider:
-    """Solar provider that receives production data from MQTT messages.
-
-    Stores the latest production and consumption values and provides
-    typical hourly production profiles for planning purposes.
+class SolarChargerController:
     """
+    Controller that manages charging based on solar production and electricity prices.
 
-    def __init__(self, default_production_profile: Optional[dict[int, float]] = None):
-        self._current_production_watts: float = 0.0
-        self._current_consumption_watts: float = 0.0
-        self._default_profile = default_production_profile or {
-            0: 0,
-            1: 0,
-            2: 0,
-            3: 0,
-            4: 0,
-            5: 0,
-            6: 100,
-            7: 500,
-            8: 1200,
-            9: 2000,
-            10: 2800,
-            11: 3200,
-            12: 3400,
-            13: 3200,
-            14: 2800,
-            15: 2200,
-            16: 1500,
-            17: 800,
-            18: 300,
-            19: 100,
-            20: 0,
-            21: 0,
-            22: 0,
-            23: 0,
-        }
-
-    def update_production(self, watts: float):
-        """Called when MQTT receives production update."""
-        logger.info(f"Received power production {watts} w")
-        self._current_production_watts = watts
-
-    def update_consumption(self, watts: float):
-        """Called when MQTT receives consumption update."""
-        self._current_consumption_watts = watts
-
-    @property
-    def current_production_watts(self) -> float:
-        return self._current_production_watts
-
-    @property
-    def current_consumption_watts(self) -> float:
-        return self._current_consumption_watts
-
-    @property
-    def current_excess_watts(self) -> float:
-        """Calculate current solar excess (production - consumption)."""
-        return max(0, self._current_production_watts - self._current_consumption_watts)
-
-    def get_production(self, dt: datetime.datetime) -> float:
-        """Return expected solar production in watts for the given datetime.
-
-        Uses the default profile for planning (hour of day).
-        """
-        return self._default_profile.get(dt.hour, 0.0)
-
-    def get_production_for_hour(self, hour: int) -> float:
-        """Return expected solar production in watts for a specific hour of day (0-23)."""
-        return self._default_profile.get(hour, 0.0)
-
-
-class SolarPriceProvider:
-    """Price provider that combines Tibber electricity prices with solar production.
-
-    When solar production is available, the effective price is reduced by the
-    "value" of the solar energy that can be used for charging.
-
-    The provider tracks real-time production/consumption from MQTT and uses
-    a typical production profile for planning future hours.
-
-    Solar benefit is always applied proportionally based on expected solar production,
-    regardless of amount. This allows charging even when solar alone isn't enough
-    to cover all charging needs.
+    Combines real-time solar production data with price information to determine
+    when solar charging is beneficial.
     """
 
     def __init__(
         self,
-        tibber_price_provider,
-        solar_provider: Optional[SolarProvider] = None,
+        config: ChargerConfiguration,
+        price_provider: Optional[PriceProvider] = None,
     ):
-        self.tibber_provider = tibber_price_provider
-        self.solar_provider = solar_provider or MQTTSolarProvider()
-        self.voltage = 230
+        self.config = config
+        self.price_provider = price_provider
 
-    def price_at(self, dt: datetime.datetime) -> float:
-        """Calculate effective price accounting for solar production.
+        self.power_production: float = 0.0
+        self.power_consumption: float = 0.0
 
-        Returns the effective price per kWh. When solar production is expected,
-        the price is reduced based on how much solar energy can offset grid usage.
-        """
-        electricity_price = self.tibber_provider.price_at(dt)
-        solar_benefit = self._calculate_solar_benefit(dt, electricity_price)
-        effective_price = electricity_price - solar_benefit
-        return max(0.0, effective_price)
+    def update_production(self, watts: float) -> None:
+        """Update current solar production in watts."""
+        logger.info(f"Received power production {watts} W")
+        self.power_production = watts
 
-    def _calculate_solar_benefit(
-        self, dt: datetime.datetime, electricity_price: float
+    def update_consumption(self, watts: float) -> None:
+        """Update current power consumption in watts."""
+        self.power_consumption = watts
+
+    def get_effective_price(
+        self,
+        ts: datetime.datetime = datetime.datetime.now(),
+        planned_energy_kwh: Optional[float] = None,
     ) -> float:
-        """Calculate the monetary benefit of solar production for a given hour.
-
-        Returns the reduction in price per kWh based on expected solar production.
-        Solar benefit is applied proportionally at all production levels.
         """
-        solar_watts = self.solar_provider.get_production(dt)
-        if solar_watts <= 0:
+        Get the effective grid price per kWh for the planned energy, accounting for solar offset.
+
+        effective_price = max(0, grid_price - (solar_watts / 1000) * grid_price / planned_energy_kwh)
+
+        If solar covers all planned energy, effective price is 0.
+        If no solar or no planned energy, effective price is the grid price.
+        """
+        if self.price_provider is None:
             return 0.0
 
-        solar_kwh = solar_watts / 1000
-        benefit = solar_kwh * electricity_price
-        return benefit
+        grid_price = self.price_provider.price_at(ts)
+        solar_watts = self.power_production
 
-    def get_effective_price_now(self) -> float:
-        """Get the current effective price based on real-time solar production."""
+        if solar_watts <= 0 or planned_energy_kwh is None or planned_energy_kwh <= 0:
+            return grid_price
+
+        solar_kwh = solar_watts / 1000
+        effective_price = grid_price - (solar_kwh * grid_price / planned_energy_kwh)
+        return max(0.0, effective_price)
+
+    def solar_charging_available(
+        self, session: ChargingSession, step: ChargingStep
+    ) -> bool:
+        """Check if solar charging is available based on current production and if the
+        relative price is below the price planned later in the charging session.
+
+        This allows us to start charging even if solar production alone isn't enough
+        to cover all needs, as long as it provides a meaningful benefit.
+        """
+        if self.power_production <= 0 or not session.plan:
+            return False
+
+        # Current (A) = Energy (kWh) * 1000 / (Voltage (V) * Time (h))
+        hours = 1
+        voltage = 230
+        planned_energy = self.power_production * hours
+        current = math.ceil(planned_energy / (voltage * hours))
+
+        # TODO: Add min and max current for the charger configuration. For now, we assume 6-16 A range.
+        current = max(6, min(16, current))
+
+        # Get the effective price for the planned energy, if charging at current.
+        planned_energy_kwh = BasePlanner._get_energy(current, hours)
+        effective_price = self.get_effective_price(
+            planned_energy_kwh=planned_energy_kwh
+        )
+        logger.info(
+            f"Effective price for next hour: %.2f SEK/kWh, charging at {current}A",
+            effective_price,
+        )
+
         now = datetime.datetime.now()
-        electricity_price = self.tibber_provider.price_at(now)
-        solar_watts = self.solar_provider.current_production_watts
-        if solar_watts <= 0:
-            return electricity_price
-        solar_kwh = solar_watts / 1000
-        benefit = solar_kwh * electricity_price
-        return max(0.0, electricity_price - benefit)
+        future_prices = [
+            step.mean_price
+            for step in session.plan.steps
+            if step.start_time > now and step.mean_price is not None
+        ]
 
-    def get_grid_price_now(self) -> float:
-        """Get the current grid electricity price without solar benefit."""
-        return self.tibber_provider.price_at(datetime.datetime.now())
+        logger.debug(f"Charging plan: {session.plan.model_dump_json(indent=2)}")
+        logger.debug(f"Future prices: {json.dumps(future_prices, indent=2)}")
 
-    def get_solar_excess(self) -> float:
-        """Get current solar excess in watts from real-time MQTT data."""
-        return self.solar_provider.current_excess_watts
+        if not future_prices:
+            return True
 
-    def is_solar_available(self) -> bool:
-        """Check if currently there's meaningful solar production."""
-        return self.solar_provider.current_production_watts > 0
+        min_future_price = min(future_prices)
+        charging_available = effective_price < min_future_price
+
+        logger.info(
+            "Minimum future price in session plan: %.2f SEK/kWh", min_future_price
+        )
+
+        if charging_available:
+            logger.info("Solar charging is available and beneficial")
+        else:
+            logger.info("Solar charging is not beneficial compared to future prices")
+
+        return charging_available

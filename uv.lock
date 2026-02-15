@@ -287,6 +287,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyrate-limiter"
+version = "4.0.2"
+source = { registry = "http://10.100.0.10:8091/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/98/2b3dc1ba6bdf2efaeaa3e102124cbd2636a4ccec241ffeb8a1de207f5cd4/pyrate_limiter-4.0.2.tar.gz", hash = "sha256:b678841e2215f114ef6f98c7093755ca3b466de83cb5a881231fd6e321fa14b5", size = 301304, upload-time = "2026-01-23T09:37:33.612Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/13/b9/80ffe3f2c34d3247186d74b1d08c1fed1e3ad4127ff6a8a5501b7bf16a97/pyrate_limiter-4.0.2-py3-none-any.whl", hash = "sha256:35ec42b9bb9cfabcafab14d0c5c6523f48378c3da2949e534ce3cbdfea71eadd", size = 36439, upload-time = "2026-01-23T09:37:32.097Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "9.0.2"
 source = { registry = "http://10.100.0.10:8091/simple" }
@@ -376,6 +385,7 @@ dependencies = [
     { name = "mqtt-discovery" },
     { name = "paho-mqtt" },
     { name = "pydantic" },
+    { name = "pyrate-limiter" },
     { name = "pyyaml" },
     { name = "requests" },
 ]
@@ -393,6 +403,7 @@ requires-dist = [
     { name = "mqtt-discovery", specifier = ">=1.0.0,<1.1.0" },
     { name = "paho-mqtt", specifier = ">=2.1.0,<3" },
     { name = "pydantic", specifier = ">=2.12.5,<3" },
+    { name = "pyrate-limiter", specifier = ">=4.0.2" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "requests", specifier = ">=2.32.5,<3" },
 ]

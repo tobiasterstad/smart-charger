@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from smart_charger.config import ChargerConfiguration, VehicleConfig
 from smart_charger.price_providers import PriceProvider
 from smart_charger.vehicle import VehicleStatus
-from typing import Protocol, List, Tuple, Optional
+from typing import List, Optional
 from pydantic.dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,8 @@ class ChargingStep(BaseModel):
     description: str
     solar_priority: bool = False
     solar_max_current: Optional[int] = None
+    mean_price: Optional[float] = None
+    grid_price: Optional[float] = None
 
     @property
     def energy_kwh(self) -> float:
@@ -394,7 +396,7 @@ class PriceAwarePlanner(BasePlanner):
         self.config = config
         self.price_provider = price_provider
 
-    def plan_charging(self, vehicle: VehicleStatus):
+    def plan_charging(self, vehicle: VehicleStatus) -> ChargingPlan:
         vehicle_config = self.config.get_vehicle_config_by_id(vehicle.id)
         planned_energy_kwh = self._get_planned_energy(vehicle, vehicle_config)
 
@@ -466,22 +468,34 @@ class PriceAwarePlanner(BasePlanner):
                     break
 
         # build chosen_hours from candidates and group adjacent hours with same current into steps
-        chosen_hours: List[Tuple[datetime.datetime, int]] = [
-            (c.dt, c.current) for c in candidates if c.chosen
-        ]
-        # ensure chronological order
-        chosen_hours.sort(key=lambda t: t[0])
+        chosen_hours = [c for c in candidates if c.chosen]
+        chosen_hours.sort(key=lambda c: c.dt)
+        logger.warning(f"Chosen hours sorted: {chosen_hours}")
+
+        # chosen_hours: List[Tuple[datetime.datetime, int]] = [
+        #    (c.dt, c.current) for c in candidates if c.chosen
+        # ]
+        ## ensure chronological order
+        # chosen_hours.sort(key=lambda t: t[0])
         steps: List[ChargingStep] = []
         if chosen_hours:
-            block_start = chosen_hours[0][0]
-            block_current = chosen_hours[0][1]
+            block_start = chosen_hours[0].dt
+            block_current = chosen_hours[0].current
+            block_prices: List[float] = (
+                [chosen_hours[0].price] if chosen_hours[0].price is not None else []
+            )
             block_end = block_start + datetime.timedelta(hours=1)
 
-            for dt, current in chosen_hours[1:]:
-                if current == block_current and dt == block_end:
+            for h in chosen_hours[1:]:
+                if h.current == block_current and h.dt == block_end:
                     # extend block
+                    if h.price is not None:
+                        block_prices.append(h.price)
                     block_end += datetime.timedelta(hours=1)
                 else:
+                    block_price = (
+                        sum(block_prices) / len(block_prices) if block_prices else None
+                    )
                     steps.append(
                         ChargingStep(
                             id=str(uuid.uuid4()),
@@ -489,13 +503,18 @@ class PriceAwarePlanner(BasePlanner):
                             stop_time=block_end,
                             current=block_current,
                             description="Price-aware block",
+                            mean_price=block_price,
                         )
                     )
-                    block_start = dt
-                    block_current = current
-                    block_end = dt + datetime.timedelta(hours=1)
+                    block_start = h.dt
+                    block_current = h.current
+                    block_prices = [h.price] if h.price is not None else []
+                    block_end = h.dt + datetime.timedelta(hours=1)
 
             # append last block
+            block_price = (
+                sum(block_prices) / len(block_prices) if block_prices else None
+            )
             steps.append(
                 ChargingStep(
                     id=str(uuid.uuid4()),
@@ -503,6 +522,7 @@ class PriceAwarePlanner(BasePlanner):
                     stop_time=block_end,
                     current=block_current,
                     description="Price-aware block",
+                    mean_price=block_price,
                 )
             )
 

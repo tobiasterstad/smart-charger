@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import logging
-import uuid
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from enum import Enum
@@ -21,14 +20,15 @@ from smart_charger.planner import (
     ChargingStep,
     SimpleHourPlanner,
     PriceAwarePlanner,
-    get_now,
 )
 from smart_charger.price_providers import TibberPriceProvider
-from smart_charger.solar_providers import MQTTSolarProvider, SolarPriceProvider
+from smart_charger.solar_providers import SolarChargerController
 from smart_charger.session import SessionManager, ChargingSession
 from smart_charger.tariff import create_tariff_provider, TariffProvider
 from smart_charger.tibber.tibber_util import TibberConfig
 from smart_charger.zaptec import OperatingMode
+
+from pyrate_limiter import Duration, Rate, Limiter
 
 logger = logging.getLogger(__name__)
 
@@ -89,22 +89,21 @@ class SmartCharger:
         self.power_production: float = 0.0
         self.power_accumulated_hourly_consumption: float = 0.0
         self.power_accumulated_hourly_consumption_high: bool = False
-        self.solar_provider = MQTTSolarProvider()
         self.session_manager = SessionManager()
 
         if self.config.planner == PlannerType.SIMPLE:
             logger.info("Configure simple hour planner")
             self.planner = SimpleHourPlanner(self.config)
-            self.solar_price_provider = None
+            self.solar_charger_controller = SolarChargerController(self.config)
         elif self.config.planner == PlannerType.TIBBER:
             logger.info("Configure Tibber hour planner")
             tibber_config = TibberConfig(api_key=secrets.tibber_api_key)
-            tibber_prices = TibberPriceProvider(tibber_config)
-            self.solar_price_provider = SolarPriceProvider(
-                tibber_prices, self.solar_provider
+            tibber_price_provider = TibberPriceProvider(tibber_config)
+            self.solar_charger_controller = SolarChargerController(
+                self.config, price_provider=tibber_price_provider
             )
             self.planner = PriceAwarePlanner(
-                self.config, price_provider=self.solar_price_provider
+                self.config, price_provider=tibber_price_provider
             )
 
         self.tariff_provider: TariffProvider = create_tariff_provider(
@@ -134,12 +133,12 @@ class SmartCharger:
         # Power events (multiple handlers)
         for cb in (
             self._on_updated_power_consumption,
-            self.solar_provider.update_consumption,
+            self.solar_charger_controller.update_consumption,
         ):
             ml.add_on_power_consumption_updated(cb)
         for cb in (
             self._on_power_production_changed,
-            self.solar_provider.update_production,
+            self.solar_charger_controller.update_production,
         ):
             ml.add_on_power_production_changed(cb)
 
@@ -271,7 +270,10 @@ class SmartCharger:
             )
             return
 
-        effective_price = self.solar_price_provider.get_effective_price_now()
+        planned_energy_kwh = session.plan.energy_kwh if session.plan else None
+        effective_price = self.solar_charger_controller.get_effective_price(
+            planned_energy_kwh=planned_energy_kwh
+        )
         max_price = self.config.solar_max_effective_price
 
         logger.info(
@@ -314,41 +316,52 @@ class SmartCharger:
         :return: None
         """
         logger.info("Starting async charger loop")
+        limiter = Limiter(Rate(1, Duration.SECOND * 30))
         try:
             while True:
+                if limiter.try_acquire("mytest", blocking=False):
+                    logger.info("hej")
+
                 # Check charging sessions
                 for session in self.session_manager.current_sessions:
                     charger = session.charger
                     plan = session.plan
                     charging_step = plan.get_charging_step() if plan else None
 
-                    # Check for solar surplus charging opportunity
-                    if (
-                        self.config.solar_surplus_charging
-                        and not charger.charging
-                        and session.vehicle
-                        and session.vehicle.connected
-                        and charger.connected
+                    if self.solar_charger_controller.solar_charging_available(
+                        session, charging_step
                     ):
-                        solar_excess = self.solar_provider.current_excess_watts
                         logger.info(
-                            f"Solar excess: {solar_excess}W, min required: {self.config.solar_min_excess_watts}W"
+                            "Solar charging available - checking for opportunities"
                         )
-                        if solar_excess >= self.config.solar_min_excess_watts:
-                            logger.info(
-                                f"Starting solar surplus charging, excess {solar_excess}W >= {self.config.solar_min_excess_watts}W"
-                            )
-                            solar_step = ChargingStep(
-                                id=str(uuid.uuid4()),
-                                start_time=get_now(),
-                                current=6,
-                                description="Solar surplus charging",
-                                solar_priority=True,
-                                solar_max_current=6,
-                            )
-                            charger.charging = True
-                            plan.active_step = solar_step
-                            self._on_charge_start(session, solar_step)
+
+                    # # Check for solar surplus charging opportunity
+                    # if (
+                    #     self.config.solar_surplus_charging
+                    #     and not charger.charging
+                    #     and session.vehicle
+                    #     and session.vehicle.connected
+                    #     and charger.connected
+                    # ):
+                    #     solar_excess = self.solar_provider.current_excess_watts
+                    #     logger.info(
+                    #         f"Solar excess: {solar_excess}W, min required: {self.config.solar_min_excess_watts}W"
+                    #     )
+                    #     if solar_excess >= self.config.solar_min_excess_watts:
+                    #         logger.info(
+                    #             f"Starting solar surplus charging, excess {solar_excess}W >= {self.config.solar_min_excess_watts}W"
+                    #         )
+                    #         solar_step = ChargingStep(
+                    #             id=str(uuid.uuid4()),
+                    #             start_time=get_now(),
+                    #             current=6,
+                    #             description="Solar surplus charging",
+                    #             solar_priority=True,
+                    #             solar_max_current=6,
+                    #         )
+                    #         charger.charging = True
+                    #         plan.active_step = solar_step
+                    #         self._on_charge_start(session, solar_step)
 
                     # Start charging
                     if charging_step and not charger.charging:
@@ -372,26 +385,16 @@ class SmartCharger:
 
                     # Stop charging
                     elif not charging_step and charger and charger.charging:
-                        # Only stop if not a solar surplus charging step
-                        if plan.active_step and plan.active_step.solar_priority:
-                            # Check if we still have excess, if not stop
-                            solar_excess = self.solar_provider.current_excess_watts
-                            if solar_excess < self.config.solar_min_excess_watts:
-                                logger.info("Stop charging - no more solar excess")
-                                charger.charging = False
-                                plan.active_step = None
-                                self._on_charge_stop(session)
-                        else:
-                            logger.info("Stop charging")
-                            charger.charging = False
-                            plan.active_step = None
-                            self._on_charge_stop(session)
+                        logger.info("Stop charging")
+                        charger.charging = False
+                        plan.active_step = None
+                        self._on_charge_stop(session)
 
                     # Dynamic current adjustment based on effective price (solar-aware)
                     # Rate-limited to solar_charge_interval_minutes
                     if (
                         charger.charging
-                        and self.solar_price_provider
+                        and self.solar_charger_controller
                         and session.vehicle
                         and session.vehicle.connected
                     ):

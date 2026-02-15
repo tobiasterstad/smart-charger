@@ -46,7 +46,7 @@ class TibberPriceProvider(PriceProvider):
 
     def __init__(self, tibber_config: TibberConfig):
         self.tibber_prices_util = TibberPrices(tibber_config)
-        self.fallback_price = 0.0
+        self.fallback_price = 0.5
 
     def _update_prices(self):
         self.prices = []
