@@ -6,25 +6,24 @@ from smart_charger.smartcharger import (
     HealthCheckResult,
 )
 from smart_charger.planner import VehicleStatus
-from smart_charger.chargers import BaseCharger
+from smart_charger.chargers import BaseCharger, ChargerStatus
 from smart_charger.config import ChargerType
 from smart_charger.zaptec import OperatingMode
 
 
 class FakeChargerForTest(BaseCharger):
     def __init__(self, id: str, connected: bool = False):
-        super().__init__(
-            id=id, connected=connected, charging=False, current=0, read_only=True
-        )
+        status = ChargerStatus.CONNECTED if connected else ChargerStatus.DISCONNECTED
+        super().__init__(id=id, status=status, current=0, read_only=True)
 
     def charger_type(self) -> ChargerType:
         return ChargerType.ZAPTEC
 
     def start_charging(self):
-        self.charging = True
+        self.status = ChargerStatus.CHARGING
 
     def stop_charging(self):
-        self.charging = False
+        self.status = ChargerStatus.CONNECTED
 
     def set_current(self, current: float):
         self.current = current
@@ -135,8 +134,7 @@ class TestMockCharger(unittest.TestCase):
     def test_fake_charger_creation(self):
         charger = FakeChargerForTest(id="test-charger", connected=True)
         self.assertEqual(charger.id, "test-charger")
-        self.assertTrue(charger.connected)
-        self.assertFalse(charger.charging)
+        self.assertEqual(charger.status, ChargerStatus.CONNECTED)
 
 
 if __name__ == "__main__":

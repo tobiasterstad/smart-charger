@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from smart_charger.session import SessionManager, ChargingSession
 from smart_charger.planner import VehicleStatus
-from smart_charger.chargers import BaseCharger
+from smart_charger.chargers import BaseCharger, ChargerStatus
 from smart_charger.config import ChargerType
 from smart_charger.zaptec import OperatingMode
 
@@ -11,23 +11,31 @@ from smart_charger.zaptec import OperatingMode
 class FakeCharger(BaseCharger):
     def __init__(self, id: str):
         super().__init__(
-            id=id, connected=False, charging=False, current=0, read_only=False
+            id=id, status=ChargerStatus.DISCONNECTED, current=0, read_only=False
         )
 
     def charger_type(self) -> ChargerType:
         return ChargerType.ZAPTEC
 
     def start_charging(self):
-        self.charging = True
+        self.status = ChargerStatus.CHARGING
 
     def stop_charging(self):
-        self.charging = False
+        self.status = ChargerStatus.CONNECTED
 
     def set_current(self, current: float):
         self.current = current
 
     def get_status(self) -> OperatingMode:
         return OperatingMode.Disconnected
+
+    @staticmethod
+    def get_connected_from_status(status: str):
+        return True
+
+    @staticmethod
+    def get_charging_from_status(status: str):
+        return False
 
     @staticmethod
     def get_connected_from_status(status: str) -> bool:
@@ -103,7 +111,7 @@ class TestSessionManagerConnectedCharger(unittest.TestCase):
 
     def test_connected_charger_not_connected(self):
         charger = FakeCharger(id="charger1")
-        charger.connected = False
+        charger.status = ChargerStatus.DISCONNECTED
 
         self.manager.connected_charger(charger)
 
@@ -111,7 +119,7 @@ class TestSessionManagerConnectedCharger(unittest.TestCase):
 
     def test_connected_charger_creates_session(self):
         charger = FakeCharger(id="charger1")
-        charger.connected = True
+        charger.status = ChargerStatus.CONNECTED
 
         self.manager.connected_charger(charger)
 
@@ -120,7 +128,7 @@ class TestSessionManagerConnectedCharger(unittest.TestCase):
 
     def test_connected_charger_disconnected_stops_session(self):
         charger = FakeCharger(id="charger1")
-        charger.connected = True
+        charger.status = ChargerStatus.CONNECTED
 
         self.manager.connected_charger(charger)
         self.assertEqual(len(self.manager.current_sessions), 1)
@@ -128,7 +136,7 @@ class TestSessionManagerConnectedCharger(unittest.TestCase):
         callback = MagicMock()
         self.manager.add_on_session_stop_listener(callback)
 
-        charger.connected = False
+        charger.status = ChargerStatus.DISCONNECTED
         self.manager.connected_charger(charger)
 
         # Session should get stop_timestamp set, trigger callback

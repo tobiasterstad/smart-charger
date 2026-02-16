@@ -136,18 +136,14 @@ class MessageListener:
                     self.chargers, charger_config.id
                 )
                 if msg.topic == charger_config.status_topic:
-                    value = charger_status.get_connected_from_status(
-                        msg.payload.decode()
+                    s = charger_status.map_status(msg.payload.decode())
+                    charger_status.status = s
+                    logger.info(
+                        f"Updated {charger_config.name} status to {charger_status}"
                     )
-                    logger.info(f"Charger value {value}")
-                    if charger_status.connected != value:
-                        charger_status.connected = value
-                        logger.info(
-                            f"Updated {charger_config.name} connected to {charger_status.connected}"
-                        )
-                        self._trigger_listeners(
-                            self._on_connected_charger_listeners, charger_status
-                        )
+                    self._trigger_listeners(
+                        self._on_connected_charger_listeners, charger_status
+                    )
 
             for vehicle in self.config.vehicles:
                 vehicle_status = SessionManager.get_vehicle_status_by_id(
@@ -200,8 +196,7 @@ class MessageListener:
             return msg.payload.decode().lower() in ["true", "1", "yes"]
 
         for charger in self.config.chargers:
-            if charger.connected_topic:
-                client.subscribe(charger.connected_topic)
+            if charger.status_topic:
                 client.subscribe(charger.status_topic)
 
         for vehicle in self.config.vehicles:

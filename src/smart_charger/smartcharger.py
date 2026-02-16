@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import datetime
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from enum import Enum
@@ -9,6 +8,7 @@ from typing import Optional
 from smart_charger.secrets import Secrets
 from smart_charger.chargers import (
     BaseCharger,
+    ChargerStatus,
     CtekCharger,
     ZaptecCharger,
     ZaptecSettings,
@@ -186,8 +186,7 @@ class SmartCharger:
             vehicle.connected = False
         charger = session.charger
         if charger:
-            charger.connected = False
-            charger.charging = False
+            charger.status = ChargerStatus.DISCONNECTED
 
         self.session_manager.archive_sessions()
 
@@ -209,16 +208,6 @@ class SmartCharger:
         if status == OperatingMode.Connected_Charging:
             session.charger.stop_charging()
 
-    @staticmethod
-    def _on_changed_charging_step(
-        session: ChargingSession,
-        previous_charging_step: ChargingStep,
-        charging_step: ChargingStep,
-    ):
-        logger.info(f"Changed charging step {charging_step.id}")
-        if previous_charging_step.current != charging_step.current:
-            session.charger.set_current(charging_step.current)
-
     def _on_target_reached(self, vehicle: VehicleStatus):
         session = self.session_manager.get_session_by_vehicle(vehicle_id=vehicle.id)
         logger.info(f"Target soc {session.target_soc} reached for {vehicle.id}")
@@ -229,6 +218,19 @@ class SmartCharger:
     @staticmethod
     def _on_soc_changed(vehicle: VehicleStatus):
         logger.info(f"Vehicle {vehicle.id} changes SOC: {vehicle.soc}")
+
+    @staticmethod
+    def _on_high_consumption_stop(session):
+        logger.warning(
+            "Hourly energy threshold exceeded - stopping charging until next hour"
+        )
+        session.charger.status = ChargerStatus.PAUSED_HIGH_LOAD
+        session.charger.current = 0
+        session.charger.stop_charging()
+        # self.effect_tariff_stopped_hour = datetime.datetime.now().hour
+
+    def _on_high_consumption_start(self, session):
+        pass
 
     def _on_updated_power_consumption(self, power):
         logger.debug(f"Received power consumption: {power} watts")
@@ -249,48 +251,6 @@ class SmartCharger:
             > self.config.high_hourly_energy_threshold
         )
 
-    def _handle_effect_tariff(self, session: ChargingSession) -> None:
-        """Handle hourly energy threshold: stop when exceeded, resume at next hour."""
-        charger = session.charger
-        current_hour = datetime.datetime.now().hour
-
-        if (
-            self.power_accumulated_hourly_consumption_high
-            and charger.charging
-            and self.effect_tariff_stopped_hour != current_hour
-        ):
-            logger.warning(
-                "Hourly energy threshold exceeded (%.1f kWh > %.1f kWh) - stopping charging",
-                self.power_accumulated_hourly_consumption,
-                self.config.high_hourly_energy_threshold,
-            )
-            charger.charging = False
-            session.plan.active_step = None
-            self._on_charge_stop(session)
-            self.effect_tariff_stopped_hour = current_hour
-            return
-
-        if (
-            self.effect_tariff_stopped_hour is not None
-            and self.effect_tariff_stopped_hour != current_hour
-        ):
-            logger.info(
-                "New hour (%d) - clearing effect tariff stop, was stopped at hour %d",
-                current_hour,
-                self.effect_tariff_stopped_hour,
-            )
-            self.effect_tariff_stopped_hour = None
-
-        if (
-            self.power_accumulated_hourly_consumption_high
-            and not charger.charging
-            and session.get_current_charging_step()
-        ):
-            logger.warning(
-                "Hourly energy threshold exceeded - not starting charging until next hour"
-            )
-            return
-
     def _handle_solar_charging(self, session: ChargingSession) -> None:
         """Handle solar surplus charging."""
         charger = session.charger
@@ -307,48 +267,60 @@ class SmartCharger:
             logger.info(
                 f"Solar charging available - current: {prediction.current}, effective price: {prediction.effective_price}"
             )
-            if not charger.charging:
+            if charger.status != ChargerStatus.CHARGING:
                 charger.start_charging()
             if charger.current != prediction.current:
                 charger.set_current(prediction.current)
+            # TODO: Decide if this should also be a status
             session.solar_charging = True
         else:
             logger.debug("Solar charging not available - not starting solar charging")
-            if charger.charging:
+            if charger.status == ChargerStatus.CHARGING:
                 charger.stop_charging()
             session.solar_charging = False
 
     def _handle_charging_control(self, session: ChargingSession) -> None:
-        """Handle charging start/stop/change based on charging step and solar status."""
+        """Handle charging start/stop/change based on charging step and effect tariff."""
         charger = session.charger
         charging_step = session.get_current_charging_step()
 
-        if charging_step and not charger.charging:
+        # Charger is ready to start charging
+        if charging_step and charger.status == ChargerStatus.CONNECTED:
             logger.info(f"Starting charging, current {charging_step.current}")
-            session.plan.active_step = charging_step
             self._on_charge_start(session, charging_step)
 
-        elif charging_step and charging_step.id != session.plan.active_step.id:
-            logger.info(f"Changing charging step, current {charging_step.current}")
-            previous_charging_step = session.plan.active_step
-            session.plan.active_step = charging_step
-            self._on_changed_charging_step(
-                session, previous_charging_step, charging_step
-            )
-
+        # Resume charging if it was paused due to high load and conditions are now good
         elif (
-            not charging_step
-            and charger
-            and charger.charging
-            and not session.solar_charging
+            session.charger.status == ChargerStatus.PAUSED_HIGH_LOAD
+            and not self.power_accumulated_hourly_consumption_high
+            and charging_step
         ):
+            logger.info("Resuming charging after high load pause")
+            self._on_high_consumption_start(session)
+
+        # Stop charging if we are currently charging but the hourly energy threshold is exceeded
+        elif (
+            self.power_accumulated_hourly_consumption_high
+            and charger.status == ChargerStatus.CHARGING
+        ):
+            logger.warning(
+                "Hourly energy threshold exceeded - stopping charging until next hour"
+            )
+            self._on_high_consumption_stop(session)
+
+        # Set new current
+        elif (
+            charging_step
+            and charger.status == ChargerStatus.CHARGING
+            and charging_step.current != charger.current
+        ):
+            logger.info(f"Changing charging step, current {charging_step.current}")
+            charger.set_current(charging_step.current)
+
+        # Stop charging
+        elif not charging_step and charger.status == ChargerStatus.CHARGING:
             logger.info("Stop charging")
-            charger.charging = False
-            session.plan.active_step = None
-            self._on_charge_stop(session)
-            logger.info("Stop charging")
-            charger.charging = False
-            session.plan.active_step = None
+            charger.status = ChargerStatus.CONNECTED
             self._on_charge_stop(session)
 
     async def charger_loop(self, check_interval_seconds: int = 10) -> None:
@@ -362,9 +334,6 @@ class SmartCharger:
         try:
             while True:
                 for session in self.session_manager.current_sessions:
-                    if self.config.high_hourly_energy_threshold is not None:
-                        self._handle_effect_tariff(session)
-
                     if not session.get_current_charging_step():
                         self._handle_solar_charging(session)
 
@@ -404,24 +373,36 @@ class SmartCharger:
                     )
 
                 for charger in self.chargers:
-                    # self.message_sender.publish(
-                    #     f"{self.config.smart_charger_topic_prefix}/chargers/{charger.id.lower()}/connected",
-                    #     charger.connected,
-                    # )
-                    self.message_sender.publish(
-                        f"{self.config.smart_charger_topic_prefix}/chargers/{charger.id.lower()}/charging",
-                        charger.charging,
-                    )
+                    charger_config = self.config.get_charger_config_by_id(charger.id)
+                    if charger_config:
+                        self.message_sender.publish(
+                            charger_config.get_outgoing_status_topic(
+                                self.config.smart_charger_topic_prefix
+                            ),
+                            charger.status.value,
+                        )
+                        self.message_sender.publish(
+                            charger_config.get_outgoing_current_topic(
+                                self.config.smart_charger_topic_prefix
+                            ),
+                            charger.current,
+                        )
 
                 for vehicle in self.vehicles:
-                    self.message_sender.publish(
-                        f"{self.config.smart_charger_topic_prefix}/vehicles/{vehicle.id.lower()}/connected",
-                        vehicle.connected,
-                    )
-                    self.message_sender.publish(
-                        f"{self.config.smart_charger_topic_prefix}/vehicles/{vehicle.id.lower()}/soc",
-                        vehicle.soc,
-                    )
+                    vehicle_config = self.config.get_vehicle_config_by_id(vehicle.id)
+                    if vehicle_config:
+                        self.message_sender.publish(
+                            vehicle_config.get_outgoing_connected_topic(
+                                self.config.smart_charger_topic_prefix
+                            ),
+                            vehicle.connected,
+                        )
+                        self.message_sender.publish(
+                            vehicle_config.get_outgoing_soc_topic(
+                                self.config.smart_charger_topic_prefix
+                            ),
+                            vehicle.soc,
+                        )
 
                 await asyncio.sleep(check_interval_seconds)
         except asyncio.CancelledError:

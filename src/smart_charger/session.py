@@ -8,7 +8,7 @@ from typing import Optional, Callable, List
 
 from pydantic import BaseModel
 
-from smart_charger.chargers import BaseCharger
+from smart_charger.chargers import BaseCharger, ChargerStatus
 from smart_charger.planner import ChargingPlan, ChargingStep, VehicleStatus
 
 logger = logging.getLogger(__name__)
@@ -26,8 +26,6 @@ class ChargingSession(BaseModel):
     charger: Optional[BaseCharger] = None
     plan: Optional[ChargingPlan] = None
     target_soc: Optional[int] = None
-    last_current_change: Optional[datetime.datetime] = None
-    current_amps: int = 0
     solar_charging: bool = False
 
     def get_current_charging_step(self) -> Optional[ChargingStep]:
@@ -115,10 +113,10 @@ class SessionManager:
         return None
 
     def connected_charger(self, charger: BaseCharger) -> None:
-        logger.info(f"Charger {charger.id} connected {charger.connected}")
+        logger.info(f"Charger {charger.id} status {charger.status}")
         session = self.get_session_by_charger(charger.id)
         if session is None:
-            if not charger.connected:
+            if charger.status == ChargerStatus.DISCONNECTED:
                 logger.debug(
                     "Charger %s is not connected, no session to create", charger.id
                 )
@@ -133,7 +131,7 @@ class SessionManager:
                 logger.info(f"Created session: \n{session}")
                 self.current_sessions.append(new_session)
         elif session:
-            if not charger.connected:
+            if charger.status == ChargerStatus.DISCONNECTED:
                 logger.info("Charger %s is disconnected", charger.id)
                 session.stop_timestamp = datetime.datetime.now()
                 self._trigger_session_stop(session)

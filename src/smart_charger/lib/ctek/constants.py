@@ -14,6 +14,7 @@ class DAYS(int, Enum):
 
 CURRENT_LIMITS = [6, 8, 10, 12, 14, 16]
 
+
 @dataclasses.dataclass
 class Schedule:
     start_day: DAYS

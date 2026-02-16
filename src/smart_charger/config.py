@@ -15,8 +15,16 @@ class ChargerConfig(BaseModel):
     id: str
     name: str
     type: ChargerType
-    connected_topic: Optional[str]
-    status_topic: Optional[str]
+    status_topic: Optional[str] = None
+
+    def build_topics(self, prefix: str) -> str:
+        return f"{prefix}/chargers/{self.id}/status"
+
+    def get_outgoing_status_topic(self, prefix: str) -> str:
+        return f"{prefix}/chargers/{self.id.lower()}/status"
+
+    def get_outgoing_current_topic(self, prefix: str) -> str:
+        return f"{prefix}/chargers/{self.id.lower()}/current"
 
 
 class VehicleConfig(BaseModel):
@@ -27,7 +35,18 @@ class VehicleConfig(BaseModel):
     soc_topic: Optional[str] = None
     connected_topic: Optional[str] = None
     enabled: bool = True
-    topic_prefix: Optional[str] = None
+
+    def build_topics(self, prefix: str) -> tuple[str, str]:
+        return (
+            f"{prefix}/vehicles/{self.id}/connected",
+            f"{prefix}/vehicles/{self.id}/soc",
+        )
+
+    def get_outgoing_connected_topic(self, prefix: str) -> str:
+        return f"{prefix}/vehicles/{self.id.lower()}/connected"
+
+    def get_outgoing_soc_topic(self, prefix: str) -> str:
+        return f"{prefix}/vehicles/{self.id.lower()}/soc"
 
 
 class PlannerType(enum.Enum):
@@ -38,7 +57,8 @@ class PlannerType(enum.Enum):
 class ChargerConfiguration(BaseModel):
     mqtt_broker: str
     mqtt_port: int
-    smart_charger_topic_prefix: str
+    device_topic_prefix: str = "devices"
+    smart_charger_topic_prefix: str = "smartcharger"
     vehicles: list[VehicleConfig] = []
     chargers: list[ChargerConfig] = []
     tariff: GenericTariffConfig
@@ -61,6 +81,7 @@ class ChargerConfiguration(BaseModel):
         config = ChargerConfiguration(
             mqtt_broker="10.100.0.10",
             mqtt_port=1883,
+            device_topic_prefix="terstad/devices",
             smart_charger_topic_prefix="terstad/smartcharger",
             high_load_threshold=4000,
             high_hourly_energy_threshold=5.0,
@@ -68,40 +89,58 @@ class ChargerConfiguration(BaseModel):
             tariff=WinterPeak1(topic="terstad/energy/tariff"),
             planner=PlannerType.TIBBER,
         )
+        ctek_status = ChargerConfig(
+            id="ctek_charger_1",
+            name="Ctek Charger",
+            type=ChargerType.CTEK,
+        ).build_topics(config.device_topic_prefix)
+        zaptec_status = ChargerConfig(
+            id="gpn018087",
+            name="Zaptec Charger",
+            type=ChargerType.ZAPTEC,
+        ).build_topics(config.device_topic_prefix)
         config.chargers = [
             ChargerConfig(
                 id="ctek_charger_1",
                 name="Ctek Charger",
                 type=ChargerType.CTEK,
-                connected_topic="terstad/smartcharger/chargers/ctek/connected",
-                status_topic="terstad/smartcharger/chargers/ctek/status",
+                status_topic=ctek_status,
             ),
             ChargerConfig(
                 id="gpn018087",
                 name="Zaptec Charger",
                 type=ChargerType.ZAPTEC,
-                connected_topic="terstad/smartcharger/chargers/gpn018087/connected",
-                status_topic="terstad/smartcharger/chargers/gpn018087/status",
+                status_topic=zaptec_status,
             ),
         ]
+        leaf_connected, leaf_soc = VehicleConfig(
+            id="leaf",
+            name="Nissan Leaf",
+            capacity_kwh=40,
+            target_soc=80,
+        ).build_topics(config.device_topic_prefix)
+        rav4_connected, rav4_soc = VehicleConfig(
+            id="rav4",
+            name="Toyota RAV4",
+            capacity_kwh=18,
+            target_soc=100,
+        ).build_topics(config.device_topic_prefix)
         config.vehicles = [
             VehicleConfig(
                 id="leaf",
                 name="Nissan Leaf",
                 capacity_kwh=40,
                 target_soc=80,
-                topic_prefix="terstad/vehicles",
-                soc_topic="terstad/vehicles/leaf/soc",
-                connected_topic="terstad/vehicles/leaf/connected",
+                connected_topic=leaf_connected,
+                soc_topic=leaf_soc,
             ),
             VehicleConfig(
                 id="rav4",
                 name="Toyota RAV4",
                 capacity_kwh=18,
                 target_soc=100,
-                topic_prefix="terstad/vehicles",
-                soc_topic="terstad/vehicles/rav4/soc",
-                connected_topic="terstad/vehicles/rav4/connected",
+                connected_topic=rav4_connected,
+                soc_topic=rav4_soc,
             ),
         ]
         config.high_load_topic = "terstad/energy/high_load"
@@ -116,4 +155,10 @@ class ChargerConfiguration(BaseModel):
         for vehicle in self.vehicles:
             if vehicle.id == vehicle_id:
                 return vehicle
+        return None
+
+    def get_charger_config_by_id(self, charger_id: str) -> Optional[ChargerConfig]:
+        for charger in self.chargers:
+            if charger.id == charger_id:
+                return charger
         return None

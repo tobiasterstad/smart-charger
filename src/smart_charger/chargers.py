@@ -1,18 +1,30 @@
 import abc
+import enum
 import logging
 from dataclasses import dataclass
-from typing import Optional
 from pydantic import BaseModel, PrivateAttr
 from smart_charger.config import ChargerType
 from smart_charger.zaptec import ZaptecClient, ChargerCommands, OperatingMode
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
 
+class ChargerStatus(enum.Enum):
+    """
+    Smart charger status categories, abstracted from specific charger operating modes.
+    """
+
+    DISCONNECTED = "disconnected"
+    CONNECTED = "connected"
+    CHARGING = "charging"
+    PAUSED_HIGH_LOAD = "paused_high_load"
+    FINISHED = "finished"
+
+
 class BaseCharger(abc.ABC, BaseModel):
     id: str
-    connected: bool = False
-    charging: bool = False
+    status: ChargerStatus = ChargerStatus.DISCONNECTED
     current: float = 0
     read_only: bool = False
 
@@ -22,11 +34,11 @@ class BaseCharger(abc.ABC, BaseModel):
 
     @abc.abstractmethod
     def start_charging(self):
-        self.charging = True
+        self.status = ChargerStatus.CHARGING
 
     @abc.abstractmethod
     def stop_charging(self):
-        self.charging = False
+        self.status = ChargerStatus.CONNECTED
 
     @abc.abstractmethod
     def set_current(self, current: float):
@@ -37,6 +49,10 @@ class BaseCharger(abc.ABC, BaseModel):
 
     @abc.abstractmethod
     def get_status(self) -> OperatingMode:
+        raise NotImplementedError
+
+    @staticmethod
+    def map_status(status: str):
         raise NotImplementedError
 
     @staticmethod
@@ -52,7 +68,6 @@ class BaseCharger(abc.ABC, BaseModel):
 
 # Small dataclass to hold Zaptec credentials and options. This keeps secrets out of
 # your code and makes it easy to create settings objects in tests.
-from typing import Callable, Optional
 
 
 @dataclass
@@ -150,6 +165,20 @@ class ZaptecCharger(BaseCharger):
         details = self._client.get_charger_details(charger_id=self.settings.charger_id)
         op_mode = details.operating_mode
         return OperatingMode(op_mode)
+
+    @staticmethod
+    def map_status(status: str):
+        operating_mode = OperatingMode.from_name(status)
+        if operating_mode == OperatingMode.Disconnected:
+            return ChargerStatus.DISCONNECTED
+        elif operating_mode in [OperatingMode.Connected_Requesting]:
+            return ChargerStatus.CONNECTED
+        elif operating_mode == OperatingMode.Connected_Charging:
+            return ChargerStatus.CHARGING
+        elif operating_mode == OperatingMode.Connected_Finished:
+            return ChargerStatus.FINISHED
+        else:
+            return None
 
     @staticmethod
     def get_connected_from_status(status: str):

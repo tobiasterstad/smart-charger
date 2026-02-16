@@ -8,6 +8,9 @@ client_id = "smart-charger-client-mqtt"
 port = 1883
 broker = "10.100.0.10"
 
+device_topic_prefix = "terstad/devices"
+energy_topic_prefix = "terstad/energy"
+
 
 def connect_mqtt():
     def on_connect(client, userdata, flags, rc):
@@ -48,28 +51,27 @@ def main():
     if args.connect_charger:
         charger = args.connect_charger.split(":")[0]
         value = args.connect_charger.split(":")[1]
-        logger.info(f"Publishing charger connected {value}")
-        client.publish(f"terstad/smartcharger/chargers/{charger}/connected", value)
+        logger.info(f"Publishing charger status: {value}")
         if value == "true":
             client.publish(
-                f"terstad/smartcharger/chargers/{charger}/status",
+                f"{device_topic_prefix}/chargers/{charger}/status",
                 "Connected_Requesting",
             )
     elif args.connect_vehicle:
         vehicle = args.connect_vehicle.split(":")[0]
         value = args.connect_vehicle.split(":")[1]
         logger.info(f"Publishing vehicle connected {value}")
-        client.publish(f"terstad/vehicles/{vehicle}/connected", value)
+        client.publish(f"{device_topic_prefix}/vehicles/{vehicle}/connected", value)
     elif args.update_soc:
         vehicle = args.update_soc.split(":")[0]
         soc = args.update_soc.split(":")[1]
-        client.publish(f"terstad/vehicles/{vehicle}/soc", soc)
+        client.publish(f"{device_topic_prefix}/vehicles/{vehicle}/soc", soc)
     elif args.production is not None:
         logger.info(f"Publishing production {args.production} watts")
-        client.publish("terstad/energy/production", args.production)
+        client.publish(f"{energy_topic_prefix}/production", args.production)
     elif args.consumption is not None:
         logger.info(f"Publishing consumption {args.consumption} watts")
-        client.publish("terstad/energy/consumption", args.consumption)
+        client.publish(f"{energy_topic_prefix}/consumption", args.consumption)
 
     print("main() called")
 

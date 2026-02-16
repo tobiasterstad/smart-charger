@@ -43,7 +43,6 @@ class ChargingPlan(BaseModel):
     energy_kwh: float
     charge_hours: int
     steps: list[ChargingStep]
-    active_step: Optional[ChargingStep] = None
 
     @property
     def total_energy_kwh(self) -> float:
