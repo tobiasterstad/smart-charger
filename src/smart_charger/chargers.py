@@ -18,13 +18,20 @@ class ChargerStatus(enum.Enum):
     DISCONNECTED = "disconnected"
     CONNECTED = "connected"
     CHARGING = "charging"
-    PAUSED_HIGH_LOAD = "paused_high_load"
+    PAUSED = "paused"
     FINISHED = "finished"
+
+
+class ChargerReason(enum.Enum):
+    NONE = "none"
+    PAUSED_HIGH_LOAD = "high_load"
+    CHARGING_SOLAR_ONLY = "solar_only"
 
 
 class BaseCharger(abc.ABC, BaseModel):
     id: str
     status: ChargerStatus = ChargerStatus.DISCONNECTED
+    reason: ChargerReason = ChargerReason.NONE
     current: float = 0
     read_only: bool = False
 

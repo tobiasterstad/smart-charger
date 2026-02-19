@@ -9,7 +9,7 @@ import math
 from typing import Optional
 
 from smart_charger.config import ChargerConfiguration
-from smart_charger.planner import ChargingStep, BasePlanner
+from smart_charger.planner import BasePlanner
 from smart_charger.price_providers import PriceProvider
 from smart_charger.session import ChargingSession
 from pydantic import BaseModel
@@ -75,10 +75,10 @@ class SolarChargerController:
 
         solar_kwh = solar_watts / 1000
         effective_price = grid_price - (solar_kwh * grid_price / planned_energy_kwh)
-        return max(0.0, effective_price)
+        return round(max(0.0, effective_price), 2)
 
     def get_solar_charge_prediction(
-        self, session: ChargingSession, step: ChargingStep
+        self, session: ChargingSession
     ) -> SolarChargePrediction:
         """Check if solar charging is available based on current production and if the
         relative price is below the price planned later in the charging session.

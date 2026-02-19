@@ -12,6 +12,7 @@ from smart_charger.chargers import (
     CtekCharger,
     ZaptecCharger,
     ZaptecSettings,
+    ChargerReason,
 )
 from smart_charger.config import ChargerConfiguration, ChargerType, PlannerType
 from smart_charger.messages import MessageListener, MessageSender
@@ -224,7 +225,8 @@ class SmartCharger:
         logger.warning(
             "Hourly energy threshold exceeded - stopping charging until next hour"
         )
-        session.charger.status = ChargerStatus.PAUSED_HIGH_LOAD
+        session.charger.status = ChargerStatus.PAUSED
+        session.charger.reason = ChargerReason.PAUSED_HIGH_LOAD
         session.charger.current = 0
         session.charger.stop_charging()
         # self.effect_tariff_stopped_hour = datetime.datetime.now().hour
@@ -254,14 +256,11 @@ class SmartCharger:
     def _handle_solar_charging(self, session: ChargingSession) -> None:
         """Handle solar surplus charging."""
         charger = session.charger
-        charging_step = session.get_current_charging_step()
 
         if not self._solar_limiter.try_acquire("solar_charging", blocking=False):
             return
 
-        prediction = self.solar_charger_controller.get_solar_charge_prediction(
-            session, charging_step
-        )
+        prediction = self.solar_charger_controller.get_solar_charge_prediction(session)
 
         if prediction.available:
             logger.info(
@@ -291,7 +290,8 @@ class SmartCharger:
 
         # Resume charging if it was paused due to high load and conditions are now good
         elif (
-            session.charger.status == ChargerStatus.PAUSED_HIGH_LOAD
+            session.charger.status == ChargerStatus.PAUSED
+            and session.charger.reason == ChargerReason.PAUSED_HIGH_LOAD
             and not self.power_accumulated_hourly_consumption_high
             and charging_step
         ):
@@ -318,7 +318,11 @@ class SmartCharger:
             charger.set_current(charging_step.current)
 
         # Stop charging
-        elif not charging_step and charger.status == ChargerStatus.CHARGING:
+        elif (
+            not charging_step
+            and charger.status == ChargerStatus.CHARGING
+            and not session.solar_charging
+        ):
             logger.info("Stop charging")
             charger.status = ChargerStatus.CONNECTED
             self._on_charge_stop(session)
