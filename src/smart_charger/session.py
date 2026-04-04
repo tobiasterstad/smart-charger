@@ -128,7 +128,7 @@ class SessionManager:
                     charger=charger,
                     start_timestamp=datetime.datetime.now(),
                 )
-                logger.info(f"Created session: \n{session}")
+                logger.info(f"Created session: \n{new_session}")
                 self.current_sessions.append(new_session)
         elif session:
             if charger.status == ChargerStatus.DISCONNECTED:

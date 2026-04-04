@@ -255,6 +255,7 @@ class SmartCharger:
         # self.effect_tariff_stopped_hour = datetime.datetime.now().hour
 
     def _on_high_consumption_start(self, session):
+        logger.warning("Not implemented")
         pass
 
     def _on_updated_power_consumption(self, power):

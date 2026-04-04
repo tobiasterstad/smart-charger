@@ -211,6 +211,7 @@ class CtekCharger(BaseCharger):
         pass
 
     def get_status(self) -> OperatingMode:
+        # not implemented
         pass
 
     # no custom __init__ — rely on BaseModel init (pass id=<...> when instantiating)
