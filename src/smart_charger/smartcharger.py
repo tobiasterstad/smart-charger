@@ -120,10 +120,11 @@ class SmartCharger:
             self.config.tariff
         )
 
+        loop = asyncio.get_event_loop()
         self.message_listener = MessageListener(
-            self.config, self.chargers, self.vehicles
+            self.config, self.chargers, self.vehicles, loop
         )
-        self.message_sender = MessageSender(self.config)
+        self.message_sender = MessageSender(self.config, loop)
 
         self._register_event_listeners()
 

@@ -1,7 +1,7 @@
 import asyncio
 import random
 import logging
-from typing import Callable, Any
+from typing import Callable, Any, Optional
 
 from smart_charger.chargers import BaseCharger
 from smart_charger.config import ChargerConfiguration
@@ -22,10 +22,12 @@ class MessageListener:
         config: ChargerConfiguration,
         chargers: list[BaseCharger],
         vehicles: list[VehicleStatus],
+        loop: Optional[asyncio.AbstractEventLoop] = None,
     ):
         self.config = config
         self.chargers = chargers
         self.vehicles = vehicles
+        self._loop = loop
 
         # Generate a Client ID
         self.client_id = f"smartcharger-listener-{random.randint(0, 1000)}"
@@ -103,7 +105,17 @@ class MessageListener:
 
     def _schedule_reconnect(self):
         logger.info(f"Scheduling MQTT reconnection in {self._reconnect_delay} seconds")
-        asyncio.get_event_loop().call_later(self._reconnect_delay, self._do_reconnect)
+        if self._loop is not None and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._do_reconnect)
+        else:
+            import threading
+            import time
+
+            def delayed_reconnect():
+                time.sleep(self._reconnect_delay)
+                self._do_reconnect()
+
+            threading.Thread(target=delayed_reconnect, daemon=True).start()
         self._reconnect_delay = min(
             self._reconnect_delay * 2, RECONNECT_DELAY_MAX_SECONDS
         )
@@ -240,8 +252,13 @@ class MessageListener:
 
 
 class MessageSender:
-    def __init__(self, config: ChargerConfiguration):
+    def __init__(
+        self,
+        config: ChargerConfiguration,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+    ):
         self.config = config
+        self._loop = loop
         # Generate a Client ID
         self.client_id = f"smartcharger-sender-{random.randint(0, 1000)}"
         self.client = None  # MQTT client
@@ -274,7 +291,17 @@ class MessageSender:
 
     def _schedule_reconnect(self):
         logger.info(f"Scheduling MQTT reconnection in {self._reconnect_delay} seconds")
-        asyncio.get_event_loop().call_later(self._reconnect_delay, self._do_reconnect)
+        if self._loop is not None and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._do_reconnect)
+        else:
+            import threading
+            import time
+
+            def delayed_reconnect():
+                time.sleep(self._reconnect_delay)
+                self._do_reconnect()
+
+            threading.Thread(target=delayed_reconnect, daemon=True).start()
         self._reconnect_delay = min(
             self._reconnect_delay * 2, RECONNECT_DELAY_MAX_SECONDS
         )
