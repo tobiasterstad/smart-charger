@@ -33,17 +33,17 @@ class VehicleConfig(BaseModel):
     target_soc: int = 80
     capacity_kwh: Optional[float] = None
     soc_topic: Optional[str] = None
-    connected_topic: Optional[str] = None
+    status_topic: Optional[str] = None
     enabled: bool = True
 
     def build_topics(self, prefix: str) -> tuple[str, str]:
         return (
-            f"{prefix}/vehicles/{self.id}/connected",
+            f"{prefix}/vehicles/{self.id}/status",
             f"{prefix}/vehicles/{self.id}/soc",
         )
 
-    def get_outgoing_connected_topic(self, prefix: str) -> str:
-        return f"{prefix}/vehicles/{self.id.lower()}/connected"
+    def get_outgoing_status_topic(self, prefix: str) -> str:
+        return f"{prefix}/vehicles/{self.id.lower()}/status"
 
     def get_outgoing_soc_topic(self, prefix: str) -> str:
         return f"{prefix}/vehicles/{self.id.lower()}/soc"
@@ -113,13 +113,13 @@ class ChargerConfiguration(BaseModel):
                 status_topic=zaptec_status,
             ),
         ]
-        leaf_connected, leaf_soc = VehicleConfig(
+        leaf_status, leaf_soc = VehicleConfig(
             id="leaf",
             name="Nissan Leaf",
             capacity_kwh=40,
             target_soc=80,
         ).build_topics(config.device_topic_prefix)
-        rav4_connected, rav4_soc = VehicleConfig(
+        rav4_status, rav4_soc = VehicleConfig(
             id="rav4",
             name="Toyota RAV4",
             capacity_kwh=18,
@@ -131,7 +131,7 @@ class ChargerConfiguration(BaseModel):
                 name="Nissan Leaf",
                 capacity_kwh=40,
                 target_soc=80,
-                connected_topic=leaf_connected,
+                status_topic=leaf_status,
                 soc_topic=leaf_soc,
             ),
             VehicleConfig(
@@ -139,7 +139,7 @@ class ChargerConfiguration(BaseModel):
                 name="Toyota RAV4",
                 capacity_kwh=18,
                 target_soc=100,
-                connected_topic=rav4_connected,
+                status_topic=rav4_status,
                 soc_topic=rav4_soc,
             ),
         ]

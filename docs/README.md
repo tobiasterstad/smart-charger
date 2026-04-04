@@ -43,9 +43,9 @@ Configuration is managed through `src/smart_charger/config.py` and `src/smart_ch
 | `terstad/energy/consumption` | Current power consumption (W) |
 | `terstad/energy/production` | Current solar production (W) |
 | `terstad/energy/high_load` | High load warning |
-| `terstad/smartcharger/vehicles/{id}/connected` | Vehicle connection status |
+| `terstad/smartcharger/vehicles/{id}/status` | Vehicle status |
 | `terstad/smartcharger/vehicles/{id}/soc` | Vehicle state of charge |
-| `terstad/smartcharger/chargers/{id}/charging` | Charger status |
+| `terstad/smartcharger/chargers/{id}/status` | Charger status |
 
 ## Documentation
 

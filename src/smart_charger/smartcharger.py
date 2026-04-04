@@ -27,6 +27,7 @@ from smart_charger.solar_providers import SolarChargerController
 from smart_charger.session import SessionManager, ChargingSession
 from smart_charger.tariff import create_tariff_provider, TariffProvider
 from smart_charger.tibber.tibber_util import TibberConfig
+from smart_charger.vehicle import VehicleConnectionStatus
 from smart_charger.zaptec import OperatingMode
 
 from pyrate_limiter import Duration, Rate, Limiter
@@ -184,7 +185,7 @@ class SmartCharger:
             session.vehicle.id, self.vehicles
         )
         if vehicle:
-            vehicle.connected = False
+            vehicle.connection_status = VehicleConnectionStatus.DISCONNECTED
         charger = session.charger
         if charger:
             charger.status = ChargerStatus.DISCONNECTED
@@ -409,10 +410,10 @@ class SmartCharger:
                     vehicle_config = self.config.get_vehicle_config_by_id(vehicle.id)
                     if vehicle_config:
                         self.message_sender.publish(
-                            vehicle_config.get_outgoing_connected_topic(
+                            vehicle_config.get_outgoing_status_topic(
                                 self.config.smart_charger_topic_prefix
                             ),
-                            vehicle.connected,
+                            vehicle.connection_status.value,
                         )
                         self.message_sender.publish(
                             vehicle_config.get_outgoing_soc_topic(

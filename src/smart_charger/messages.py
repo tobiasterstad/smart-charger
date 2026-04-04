@@ -7,6 +7,7 @@ from smart_charger.chargers import BaseCharger
 from smart_charger.config import ChargerConfiguration
 from smart_charger.planner import VehicleStatus
 from smart_charger.session import SessionManager
+from smart_charger.vehicle import VehicleConnectionStatus
 from paho.mqtt import client as mqtt_client
 
 logger = logging.getLogger(__name__)
@@ -149,12 +150,12 @@ class MessageListener:
                 vehicle_status = SessionManager.get_vehicle_status_by_id(
                     vehicle.id, self.vehicles
                 )
-                if msg.topic == vehicle.connected_topic:
-                    value = _decode_bool(msg)
-                    if vehicle_status.connected != value:
-                        vehicle_status.connected = value
+                if msg.topic == vehicle.status_topic:
+                    status = _decode_connection_status(msg)
+                    if vehicle_status.connection_status != status:
+                        vehicle_status.connection_status = status
                         logger.info(
-                            f"Updated {vehicle.name} connected to {vehicle_status.connected}"
+                            f"Updated {vehicle.name} connection_status to {vehicle_status.connection_status}"
                         )
                         self._trigger_listeners(
                             self._on_connected_vehicle_listeners, vehicle_status
@@ -195,13 +196,22 @@ class MessageListener:
         def _decode_bool(msg) -> bool:
             return msg.payload.decode().lower() in ["true", "1", "yes"]
 
+        def _decode_connection_status(msg) -> VehicleConnectionStatus:
+            value = msg.payload.decode().lower()
+            if value in ["true", "1", "yes", "connected"]:
+                return VehicleConnectionStatus.CONNECTED
+            elif value in ["charging"]:
+                return VehicleConnectionStatus.CHARGING
+            else:
+                return VehicleConnectionStatus.DISCONNECTED
+
         for charger in self.config.chargers:
             if charger.status_topic:
                 client.subscribe(charger.status_topic)
 
         for vehicle in self.config.vehicles:
-            if vehicle.connected_topic:
-                client.subscribe(vehicle.connected_topic)
+            if vehicle.status_topic:
+                client.subscribe(vehicle.status_topic)
             if vehicle.soc_topic:
                 client.subscribe(vehicle.soc_topic)
 

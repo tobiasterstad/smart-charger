@@ -67,17 +67,18 @@
 
 ## MQTT Topics
 
-| Topic                                         | Direction | Description                 |
-|-----------------------------------------------|-----------|-----------------------------|
-| `terstad/vehicles/{id}/connected`             | In        | Vehicle connection status   |
-| `terstad/vehicles/{id}/soc`                   | In        | Vehicle SOC percentage      |
-| `terstad/energy/consumption`                  | In        | Power consumption (watts)   |
-| `terstad/energy/production`                   | In        | Solar production (watts)    |
-| `terstad/smartcharger/chargers/{id}/status`   | In        | Charger operating mode      |
-| `terstad/smartcharger/chargers/{id}/charging` | Out       | Charger active status       |
-| `terstad/energy/tariff`                       | Out       | High tariff status          |
-| `terstad/energy/high_load`                    | Out       | High load warning           |
-| `terstad/smartcharger/sessions/{id}`          | Out       | Session JSON data           |
+| Topic                                         | Direction | Description                         |
+|-----------------------------------------------|-----------|-------------------------------------|
+| `terstad/devices/vehicles/{id}/status`        | In        | Vehicle status (disconnected/connected/charging) |
+| `terstad/devices/vehicles/{id}/soc`           | In        | Vehicle SOC percentage              |
+| `terstad/energy/consumption`                  | In        | Power consumption (watts)           |
+| `terstad/energy/production`                   | In        | Solar production (watts)            |
+| `terstad/devices/chargers/{id}/status`        | In        | Charger operating mode              |
+| `terstad/smartcharger/chargers/{id}/status`   | Out       | Charger status                      |
+| `terstad/smartcharger/vehicles/{id}/status`   | Out       | Vehicle status                      |
+| `terstad/energy/tariff`                       | Out       | High tariff status                  |
+| `terstad/energy/high_load`                    | Out       | High load warning                   |
+| `terstad/smartcharger/sessions/{id}`          | Out       | Session JSON data                   |
 
 ## Configuration
 

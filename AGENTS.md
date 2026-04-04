@@ -222,7 +222,7 @@ Raw device data published by external devices (chargers, vehicles, energy monito
 | Topic | Payload | Source |
 |-------|---------|--------|
 | `terstad/devices/chargers/{id}/status` | Zaptec OperatingMode (e.g., `"Connected_Charging"`) | Charger |
-| `terstad/devices/vehicles/{id}/connected` | boolean | Vehicle |
+| `terstad/devices/vehicles/{id}/status` | VehicleConnectionStatus (`"disconnected"`, `"connected"`, `"charging"`) | Vehicle |
 | `terstad/devices/vehicles/{id}/soc` | integer (0-100) | Vehicle |
 | `terstad/energy/consumption` | float (watts) | Energy monitor |
 | `terstad/energy/production` | float (watts) | Solar inverter |
@@ -235,7 +235,7 @@ Processed status and control data published by smart-charger:
 |-------|---------|---------|
 | `terstad/smartcharger/chargers/{id}/status` | ChargerStatus (e.g., `"charging"`) | Status broadcast |
 | `terstad/smartcharger/chargers/{id}/current` | float (Amperes) | Current setting |
-| `terstad/smartcharger/vehicles/{id}/connected` | boolean | Vehicle status |
+| `terstad/smartcharger/vehicles/{id}/status` | VehicleConnectionStatus | Vehicle status |
 | `terstad/smartcharger/vehicles/{id}/soc` | integer | Vehicle SOC |
 | `terstad/smartcharger/sessions/{id}` | JSON | Session details |
 | `terstad/energy/high_load` | boolean | High load alert |

@@ -32,18 +32,34 @@ def main():
         format="%(asctime)s %(levelname)s %(message)s", level=logging.INFO
     )
 
-    parser = ArgumentParser()
-    parser.add_argument(
-        "--connect-vehicle", type=str, help="Connect to vehicle, <vehicle>:true/false"
+    parser = ArgumentParser(
+        description="MQTT message publisher for smart-charger testing"
     )
     parser.add_argument(
-        "--connect-charger", type=str, help="Connect charger, <charger>:true/false"
+        "--connect-vehicle",
+        type=str,
+        help="Set vehicle connection status. Format: <vehicle_id>:<status> (e.g., leaf:connected, leaf:disconnected, leaf:charging)",
     )
     parser.add_argument(
-        "--update-soc", type=str, help="Update SOC for vehicle, <vehicle>:<SOC>"
+        "--connect-charger",
+        type=str,
+        help="Simulate charger status. Format: <charger_id>:<status> (e.g., gpn018087:true, gpn018087:Connected_Requesting, gpn018087:Connected_Charging)",
     )
-    parser.add_argument("--production", type=int, help="Publish production in watts")
-    parser.add_argument("--consumption", type=int, help="Publish consumption in watts")
+    parser.add_argument(
+        "--update-soc",
+        type=str,
+        help="Update vehicle state of charge (SOC). Format: <vehicle_id>:<percentage> (e.g., leaf:80)",
+    )
+    parser.add_argument(
+        "--production",
+        type=int,
+        help="Publish solar production in watts (e.g., --production 3500)",
+    )
+    parser.add_argument(
+        "--consumption",
+        type=int,
+        help="Publish current power consumption in watts (e.g., --consumption 2500)",
+    )
     args = parser.parse_args()
 
     client = connect_mqtt()
@@ -51,17 +67,32 @@ def main():
     if args.connect_charger:
         charger = args.connect_charger.split(":")[0]
         value = args.connect_charger.split(":")[1]
-        logger.info(f"Publishing charger status: {value}")
-        if value == "true":
-            client.publish(
-                f"{device_topic_prefix}/chargers/{charger}/status",
-                "Connected_Requesting",
-            )
+        valid_statuses = [
+            "Connected_Requesting",
+            "Connected_Charging",
+            "Connected_Finished",
+            "Disconnected",
+        ]
+        status = (
+            value
+            if value in valid_statuses
+            else ("Connected_Requesting" if value == "true" else "Disconnected")
+        )
+        logger.info(f"Publishing charger status: {status}")
+        client.publish(
+            f"{device_topic_prefix}/chargers/{charger}/status",
+            status,
+        )
     elif args.connect_vehicle:
         vehicle = args.connect_vehicle.split(":")[0]
         value = args.connect_vehicle.split(":")[1]
-        logger.info(f"Publishing vehicle connected {value}")
-        client.publish(f"{device_topic_prefix}/vehicles/{vehicle}/connected", value)
+        logger.info(f"Publishing vehicle status {value}")
+        status = (
+            value
+            if value in ["connected", "disconnected", "charging"]
+            else "disconnected"
+        )
+        client.publish(f"{device_topic_prefix}/vehicles/{vehicle}/status", status)
     elif args.update_soc:
         vehicle = args.update_soc.split(":")[0]
         soc = args.update_soc.split(":")[1]

@@ -105,8 +105,9 @@ Charging plan generation:
 | Topic                              | Payload | Description                  |
 |------------------------------------|---------|------------------------------|
 | `{prefix}/sessions/{id}`           | JSON    | Charging session details     |
-| `{prefix}/chargers/{id}/charging`  | boolean | Is charger actively charging |
-| `{prefix}/vehicles/{id}/connected` | boolean | Vehicle connection status    |
+| `{prefix}/chargers/{id}/status`   | string  | Charger status              |
+| `{prefix}/chargers/{id}/current`  | float   | Charging current (Amperes)  |
+| `{prefix}/vehicles/{id}/status`   | string  | Vehicle status (disconnected/connected/charging) |
 | `{prefix}/vehicles/{id}/soc`       | int     | Vehicle state of charge      |
 | `terstad/energy/tariff`            | boolean | Current tariff status        |
 | `terstad/energy/high_load`         | boolean | High load warning            |
