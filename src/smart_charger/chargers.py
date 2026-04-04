@@ -139,8 +139,14 @@ class ZaptecCharger(BaseCharger):
                     installation_id=self.settings.installation_id,
                     available_current=current,
                 )
-            except Exception:
-                logger.exception("Failed to update Zaptec installation current")
+            except Exception as e:
+                if "scheduled power management" in str(e).lower():
+                    logger.warning(
+                        f"Cannot update installation current: Zaptec is in scheduled power management mode. "
+                        f"Skipping current adjustment."
+                    )
+                else:
+                    logger.exception("Failed to update Zaptec installation current")
 
     def start_charging(self):
         super().start_charging()
@@ -149,6 +155,12 @@ class ZaptecCharger(BaseCharger):
             logger.info("Read-only mode: skipping actual start command")
             return
         try:
+            current_status = self.get_status()
+            if current_status == OperatingMode.Connected_Charging:
+                logger.info(
+                    f"Charger {self.id} is already charging, skipping START command"
+                )
+                return
             self._client.send_charger_command(
                 charger_id=self.settings.charger_id, command_id=ChargerCommands.START
             )

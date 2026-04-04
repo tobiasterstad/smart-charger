@@ -325,8 +325,9 @@ class ZaptecClient:
         }
         response = requests.post(url, json=body, headers=headers)
         if response.status_code != 200:
+            error_details = response.text
             raise Exception(
-                f"Failed to update installation: {response.status_code} {response.text}"
+                f"Failed to update installation: {response.status_code} {error_details}"
             )
 
     def get_charger_details(self, charger_id: str) -> ChargerDetail:
