@@ -1,3 +1,18 @@
 /src/smart_charger/secret.py
 /.idea/
 /smart-charger.iml
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Test/Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+*.swp
+*.swo
