@@ -60,7 +60,13 @@ class SmartCharger:
 
         for vehicle in self.config.vehicles:
             logger.info("Configure vehicle: %s", vehicle)
-            self.vehicles.append(VehicleStatus(id=vehicle.id, soc=0, connected=False))
+            self.vehicles.append(
+                VehicleStatus(
+                    id=vehicle.id,
+                    soc=0,
+                    connection_status=VehicleConnectionStatus.DISCONNECTED,
+                )
+            )
 
         for charger_config in self.config.chargers:
             logger.info("Configure charger: %s", charger_config)
@@ -212,6 +218,22 @@ class SmartCharger:
 
     def _on_target_reached(self, vehicle: VehicleStatus):
         session = self.session_manager.get_session_by_vehicle(vehicle_id=vehicle.id)
+        if session is None:
+            logger.warning(
+                f"No active session found for vehicle {vehicle.id}, cannot report target SOC reached"
+            )
+            return
+        if session.target_soc is None:
+            logger.warning(
+                f"Session for vehicle {vehicle.id} has no target_soc set, skipping"
+            )
+            return
+        if session.charger is None:
+            logger.warning(
+                f"Session for vehicle {vehicle.id} has no charger set, skipping"
+            )
+            return
+
         logger.info(f"Target soc {session.target_soc} reached for {vehicle.id}")
         status = session.charger.get_status()
         if status == OperatingMode.Connected_Charging:
@@ -496,7 +518,9 @@ class SmartCharger:
         connected_vehicles = sum(1 for v in self.vehicles if v.connected)
         details["vehicles_connected"] = f"{connected_vehicles}/{len(self.vehicles)}"
 
-        connected_chargers = sum(1 for c in self.chargers if c.connected)
+        connected_chargers = sum(
+            1 for c in self.chargers if c.status in [ChargerStatus.CONNECTED]
+        )
         details["chargers_connected"] = f"{connected_chargers}/{len(self.chargers)}"
 
         active_sessions = len(self.session_manager.current_sessions)
