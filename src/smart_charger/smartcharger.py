@@ -257,6 +257,12 @@ class SmartCharger:
         """Handle solar surplus charging."""
         charger = session.charger
 
+        if not charger:
+            logger.debug(
+                "No charger assigned to session - cannot handle solar charging"
+            )
+            return
+
         if not self._solar_limiter.try_acquire("solar_charging", blocking=False):
             return
 
@@ -281,6 +287,13 @@ class SmartCharger:
     def _handle_charging_control(self, session: ChargingSession) -> None:
         """Handle charging start/stop/change based on charging step and effect tariff."""
         charger = session.charger
+
+        if not charger:
+            logger.debug(
+                "No charger assigned to session - cannot handle charging control"
+            )
+            return
+
         charging_step = session.get_current_charging_step()
 
         # Charger is ready to start charging
