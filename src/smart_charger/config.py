@@ -52,6 +52,7 @@ class VehicleConfig(BaseModel):
 class PlannerType(enum.Enum):
     SIMPLE = 1
     TIBBER = 2
+    SOLAR_PRICE = 3  # Solar + Price aware planner
 
 
 class ChargerConfiguration(BaseModel):
@@ -75,6 +76,10 @@ class ChargerConfiguration(BaseModel):
     solar_max_effective_price: float = 0.15
     solar_min_current_amps: int = 6
     solar_charge_interval_minutes: int = 15
+    # Solar forecast settings
+    solar_peak_watts: float = 5000.0  # Peak solar production in watts
+    solar_sunrise_hour: int = 6  # Hour when solar production starts
+    solar_sunset_hour: int = 20  # Hour when solar production ends
 
     @staticmethod
     def load_defaults():

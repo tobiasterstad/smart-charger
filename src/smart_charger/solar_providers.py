@@ -1,4 +1,4 @@
-"""Solar-aware charging controller."""
+"""Solar-aware charging controller and forecasting."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import datetime
 import json
 import logging
 import math
-from typing import Optional
+from typing import Optional, Protocol
 
 from smart_charger.config import ChargerConfiguration
 from smart_charger.planner import BasePlanner
@@ -15,6 +15,138 @@ from smart_charger.session import ChargingSession
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+class SolarForecastProvider(Protocol):
+    """Protocol for solar production forecast providers.
+
+    Implementations should provide forecast_at(dt: datetime.datetime) -> float,
+    which returns the predicted solar production in watts for the hour starting at dt.
+    """
+
+    def forecast_at(self, dt: datetime.datetime) -> float: ...
+
+
+class SimpleSolarForecastProvider:
+    """Simple solar forecast using a bell curve profile for daylight hours.
+
+    This provides a basic forecast based on typical sunny-day production patterns.
+    Production follows a bell curve centered around solar noon (default 12:00).
+
+    Attributes:
+        peak_watts: Maximum production at solar noon (default 5000W).
+        sunrise_hour: Hour when production starts (default 6).
+        sunset_hour: Hour when production ends (default 20).
+        noon_hour: Hour of peak production (default 12).
+    """
+
+    def __init__(
+        self,
+        peak_watts: float = 5000.0,
+        sunrise_hour: int = 6,
+        sunset_hour: int = 20,
+        noon_hour: int = 12,
+    ):
+        self.peak_watts = peak_watts
+        self.sunrise_hour = sunrise_hour
+        self.sunset_hour = sunset_hour
+        self.noon_hour = noon_hour
+
+    def forecast_at(self, dt: datetime.datetime) -> float:
+        """Return predicted solar production in watts for the given hour.
+
+        Uses a cosine-based bell curve centered at solar noon.
+        Returns 0 outside daylight hours.
+        """
+        hour = dt.hour
+
+        # No production outside daylight hours
+        if hour < self.sunrise_hour or hour >= self.sunset_hour:
+            return 0.0
+
+        # Use cosine curve centered at noon_hour
+        # Peak at noon_hour, zero at sunrise and sunset
+        # cos(x) = 1 at x=0, -1 at x=pi
+        # We map hours to [-pi, pi] centered at noon
+        half_day = max(
+            self.noon_hour - self.sunrise_hour, self.sunset_hour - self.noon_hour
+        )
+        hours_from_noon = hour - self.noon_hour
+
+        # Normalize to [-1, 1] range, where 0 is noon
+        position = hours_from_noon / half_day
+
+        # cos(position * pi) gives 1 at noon (position=0), -1 at edges
+        # Scale to [0, 1]
+        curve_value = (1 + math.cos(position * math.pi)) / 2
+
+        return self.peak_watts * curve_value
+
+
+class MQTTSolarForecastProvider:
+    """Solar forecast provider that uses recent MQTT production data.
+
+    This provider tracks real-time solar production and uses it as the
+    basis for forecasting. It applies a daily profile adjustment to
+    estimate future production based on current conditions.
+
+    For hours that have already passed today, it uses actual recorded values.
+    For future hours, it scales based on the typical daily profile and
+    current production level.
+    """
+
+    def __init__(
+        self,
+        peak_watts: float = 5000.0,
+        sunrise_hour: int = 6,
+        sunset_hour: int = 20,
+    ):
+        self.peak_watts = peak_watts
+        self.sunrise_hour = sunrise_hour
+        self.sunset_hour = sunset_hour
+        self._current_production: float = 0.0
+        self._last_update: Optional[datetime.datetime] = None
+        self._simple_provider = SimpleSolarForecastProvider(
+            peak_watts=peak_watts,
+            sunrise_hour=sunrise_hour,
+            sunset_hour=sunset_hour,
+        )
+
+    def update_production(self, watts: float) -> None:
+        """Update current solar production from MQTT."""
+        self._current_production = watts
+        self._last_update = datetime.datetime.now()
+
+    def forecast_at(self, dt: datetime.datetime) -> float:
+        """Return predicted solar production for the given hour.
+
+        If no recent production data is available, falls back to simple profile.
+        Otherwise, scales the profile based on current production vs expected.
+        """
+        # If no recent data (older than 1 hour), use simple profile
+        if (
+            self._last_update is None
+            or (datetime.datetime.now() - self._last_update).total_seconds() > 3600
+        ):
+            return self._simple_provider.forecast_at(dt)
+
+        # Get expected production now and at requested time
+        now = datetime.datetime.now()
+        expected_now = self._simple_provider.forecast_at(now)
+        expected_at_dt = self._simple_provider.forecast_at(dt)
+
+        # If expected now is 0, we can't scale - use simple profile
+        if expected_now <= 0:
+            return expected_at_dt
+
+        # Scale factor: actual / expected production right now
+        scale_factor = self._current_production / expected_now
+
+        # Apply scale factor to expected production at target time
+        # Cap at 1.5x to avoid unrealistic forecasts from brief cloud gaps
+        scale_factor = min(scale_factor, 1.5)
+
+        return expected_at_dt * scale_factor
 
 
 class SolarChargePrediction(BaseModel):

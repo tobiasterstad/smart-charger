@@ -21,9 +21,13 @@ from smart_charger.planner import (
     ChargingStep,
     SimpleHourPlanner,
     PriceAwarePlanner,
+    SolarPriceAwarePlanner,
 )
 from smart_charger.price_providers import TibberPriceProvider
-from smart_charger.solar_providers import SolarChargerController
+from smart_charger.solar_providers import (
+    SolarChargerController,
+    MQTTSolarForecastProvider,
+)
 from smart_charger.session import SessionManager, ChargingSession
 from smart_charger.tariff import create_tariff_provider, TariffProvider
 from smart_charger.tibber.tibber_util import TibberConfig
@@ -115,6 +119,27 @@ class SmartCharger:
             self.planner = PriceAwarePlanner(
                 self.config, price_provider=tibber_price_provider
             )
+        elif self.config.planner == PlannerType.SOLAR_PRICE:
+            logger.info("Configure Solar+Price aware planner")
+            tibber_config = TibberConfig(api_key=secrets.tibber_api_key)
+            tibber_price_provider = TibberPriceProvider(tibber_config)
+
+            # Create solar forecast provider with MQTT updates
+            solar_forecast_provider = MQTTSolarForecastProvider(
+                peak_watts=self.config.solar_peak_watts,
+                sunrise_hour=self.config.solar_sunrise_hour,
+                sunset_hour=self.config.solar_sunset_hour,
+            )
+            self._solar_forecast_provider = solar_forecast_provider
+
+            self.solar_charger_controller = SolarChargerController(
+                self.config, price_provider=tibber_price_provider
+            )
+            self.planner = SolarPriceAwarePlanner(
+                self.config,
+                price_provider=tibber_price_provider,
+                solar_forecast_provider=solar_forecast_provider,
+            )
 
         self.tariff_provider: TariffProvider = create_tariff_provider(
             self.config.tariff
@@ -146,10 +171,14 @@ class SmartCharger:
             self.solar_charger_controller.update_consumption,
         ):
             ml.add_on_power_consumption_updated(cb)
-        for cb in (
+        production_callbacks = [
             self._on_power_production_changed,
             self.solar_charger_controller.update_production,
-        ):
+        ]
+        # Add solar forecast provider callback if using SOLAR_PRICE planner
+        if hasattr(self, "_solar_forecast_provider"):
+            production_callbacks.append(self._solar_forecast_provider.update_production)
+        for cb in production_callbacks:
             ml.add_on_power_production_changed(cb)
 
         ml.add_on_power_accumulated_hourly_changed(
