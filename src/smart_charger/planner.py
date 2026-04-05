@@ -48,6 +48,16 @@ class ChargingPlan(BaseModel):
     def total_energy_kwh(self) -> float:
         return sum(step.energy_kwh for step in self.steps)
 
+    def format_for_log(self) -> str:
+        """Return a human-readable string for logging."""
+        step_info = []
+        for step in self.steps:
+            start = step.start_time.strftime("%H:%M")
+            stop = step.stop_time.strftime("%H:%M") if step.stop_time else "?"
+            price = f"{step.mean_price:.4f}" if step.mean_price else "?"
+            step_info.append(f"{start}-{stop} ({step.current}A, {price})")
+        return f"Plan: {self.charge_hours}h, {self.energy_kwh:.2f}kWh, {', '.join(step_info)}"
+
     def get_charging_step(
         self, timestamp: Optional[datetime.datetime] = None
     ) -> Optional[ChargingStep]:

@@ -19,5 +19,27 @@ A system for intelligently controlling electric vehicle chargers based on electr
 
 ```bash
 # Run the smart charger
-python -m smart_charger --start
+uv run smart-charger --start
 ```
+
+## Docker
+
+### Build
+
+```bash
+docker build -t ghcr.io/terstad/smart-charger:latest .
+```
+
+### Push
+
+```bash
+docker push ghcr.io/terstad/smart-charger:latest
+```
+
+### Run
+
+```bash
+docker run -v ~/.config/smart-charger:/root/.config/smart-charger ghcr.io/terstad/smart-charger:latest
+```
+
+The secrets file at `~/.config/smart-charger/secrets.toml` is mounted into the container.

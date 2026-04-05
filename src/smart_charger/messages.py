@@ -1,19 +1,25 @@
-import asyncio
-import random
 import logging
-from typing import Callable, Any
+import random
+import threading
+from typing import Any, Callable
+
+from paho.mqtt import client as mqtt_client
 
 from smart_charger.chargers import BaseCharger
 from smart_charger.config import ChargerConfiguration
 from smart_charger.planner import VehicleStatus
 from smart_charger.session import SessionManager
 from smart_charger.vehicle import VehicleConnectionStatus
-from paho.mqtt import client as mqtt_client
 
 logger = logging.getLogger(__name__)
 
 RECONNECT_DELAY_SECONDS = 5
 RECONNECT_DELAY_MAX_SECONDS = 300
+
+
+def _schedule_delayed_call(delay: float, callback: Callable[[], None]) -> None:
+    """Schedule a callback to run after a delay using a background thread."""
+    threading.Timer(delay, callback).start()
 
 
 class MessageListener:
@@ -103,7 +109,7 @@ class MessageListener:
 
     def _schedule_reconnect(self):
         logger.info(f"Scheduling MQTT reconnection in {self._reconnect_delay} seconds")
-        asyncio.get_event_loop().call_later(self._reconnect_delay, self._do_reconnect)
+        _schedule_delayed_call(self._reconnect_delay, self._do_reconnect)
         self._reconnect_delay = min(
             self._reconnect_delay * 2, RECONNECT_DELAY_MAX_SECONDS
         )
@@ -140,7 +146,7 @@ class MessageListener:
                     s = charger_status.map_status(msg.payload.decode())
                     charger_status.status = s
                     logger.info(
-                        f"Updated {charger_config.name} status to {charger_status}"
+                        f"Updated {charger_config.name} status to {charger_status.status}"
                     )
                     self._trigger_listeners(
                         self._on_connected_charger_listeners, charger_status
@@ -242,9 +248,8 @@ class MessageListener:
 class MessageSender:
     def __init__(self, config: ChargerConfiguration):
         self.config = config
-        # Generate a Client ID
         self.client_id = f"smartcharger-sender-{random.randint(0, 1000)}"
-        self.client = None  # MQTT client
+        self.client = None
 
     def connect_mqtt(self):
         self._reconnect_delay = RECONNECT_DELAY_SECONDS
@@ -274,7 +279,7 @@ class MessageSender:
 
     def _schedule_reconnect(self):
         logger.info(f"Scheduling MQTT reconnection in {self._reconnect_delay} seconds")
-        asyncio.get_event_loop().call_later(self._reconnect_delay, self._do_reconnect)
+        _schedule_delayed_call(self._reconnect_delay, self._do_reconnect)
         self._reconnect_delay = min(
             self._reconnect_delay * 2, RECONNECT_DELAY_MAX_SECONDS
         )

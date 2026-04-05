@@ -43,6 +43,18 @@ class ChargingSession(BaseModel):
                 settings.access_token = "***REDACTED***"
         return data
 
+    def format_for_log(self) -> str:
+        """Return a human-readable string for logging."""
+        vehicle_id = self.vehicle.id if self.vehicle else "none"
+        charger_id = self.charger.id if self.charger else "none"
+        start = (
+            self.start_timestamp.strftime("%H:%M") if self.start_timestamp else "none"
+        )
+        if self.stop_timestamp:
+            stop = self.stop_timestamp.strftime("%H:%M")
+            return f"Session {self.id[:8]} ({start}-{stop}, vehicle={vehicle_id}, charger={charger_id})"
+        return f"Session {self.id[:8]} (started {start}, vehicle={vehicle_id}, charger={charger_id})"
+
 
 class SessionManager:
     """Manage current charging sessions and notify listeners on start/stop.
@@ -139,7 +151,7 @@ class SessionManager:
                     charger=charger,
                     start_timestamp=datetime.datetime.now(),
                 )
-                logger.info("Created session: %s", new_session.model_dump_safe())
+                logger.info("%s", new_session.format_for_log())
                 self.current_sessions.append(new_session)
         elif session:
             if charger.status == ChargerStatus.DISCONNECTED:
@@ -149,7 +161,7 @@ class SessionManager:
                 return
             else:
                 session.charger = charger
-                logger.info("Found existing session: %s", session.model_dump_safe())
+                logger.info("%s", session.format_for_log())
                 self._trigger_session_start(session)
 
     def connected_vehicle(self, vehicle_status: VehicleStatus) -> None:
@@ -171,7 +183,7 @@ class SessionManager:
                     charger=None,
                     start_timestamp=datetime.datetime.now(),
                 )
-                logger.info("Created session: %s", new_session.model_dump_safe())
+                logger.info("%s", new_session.format_for_log())
                 self.current_sessions.append(new_session)
         elif session:
             if not vehicle_status.connected:
@@ -180,7 +192,7 @@ class SessionManager:
                 self._trigger_session_stop(session)
             else:
                 session.vehicle = vehicle_status
-                logger.info("Found existing session: %s", session.model_dump_safe())
+                logger.info("%s", session.format_for_log())
                 self._trigger_session_start(session)
 
     def archive_sessions(self):

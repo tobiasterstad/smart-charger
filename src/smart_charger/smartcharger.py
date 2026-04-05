@@ -180,7 +180,7 @@ class SmartCharger:
                 session.vehicle.id
             ).target_soc
             session.plan = self.planner.plan_charging(session.vehicle)
-            logger.info(f"Assigned plan to session {session.id}: {session.plan}")
+            logger.info("%s", session.plan.format_for_log())
 
     def _on_session_stop(self, session: ChargingSession):
         logger.info(f"Session stopped: {session.id}")
