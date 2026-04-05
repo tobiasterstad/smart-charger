@@ -10,6 +10,7 @@ from smart_charger.chargers import (
     BaseCharger,
     ChargerStatus,
     CtekCharger,
+    CtekSettings,
     ZaptecCharger,
     ZaptecSettings,
     ChargerReason,
@@ -72,7 +73,20 @@ class SmartCharger:
             logger.info("Configure charger: %s", charger_config)
 
             if charger_config.type == ChargerType.CTEK:
-                charger = CtekCharger(id=charger_config.id, read_only=read_only)
+                settings = CtekSettings(
+                    client_id=secrets.ctek_client_id,
+                    client_secret=secrets.ctek_client_secret,
+                    username=secrets.ctek_username,
+                    password=secrets.ctek_password,
+                    device_id=secrets.ctek_device_id,
+                    access_token=secrets.ctek_access_token or None,
+                    refresh_token=secrets.ctek_refresh_token or None,
+                    token_expires_at=secrets.ctek_token_expires_at or None,
+                    on_token_refreshed=secrets.save_ctek_token,
+                )
+                charger = CtekCharger(
+                    id=charger_config.id, settings=settings, read_only=read_only
+                )
             elif charger_config.type == ChargerType.ZAPTEC:
                 settings = ZaptecSettings(
                     username=secrets.username,
