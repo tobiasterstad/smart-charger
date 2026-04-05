@@ -125,3 +125,100 @@ class Secrets:
         self._secrets_path.write_text("\n".join(new_lines) + "\n")
         self._cache = None
         logger.info(f"Saved zaptec access token to {self._secrets_path}")
+
+    @property
+    def ctek_client_id(self) -> str:
+        return self._get_nested("ctek", "client_id") or ""
+
+    @property
+    def ctek_client_secret(self) -> str:
+        return self._get_nested("ctek", "client_secret") or ""
+
+    @property
+    def ctek_username(self) -> str:
+        return self._get_nested("ctek", "username") or ""
+
+    @property
+    def ctek_password(self) -> str:
+        return self._get_nested("ctek", "password") or ""
+
+    @property
+    def ctek_device_id(self) -> str:
+        return self._get_nested("ctek", "device_id") or ""
+
+    @property
+    def ctek_access_token(self) -> str:
+        return self._get_nested("ctek", "access_token") or ""
+
+    @property
+    def ctek_refresh_token(self) -> str:
+        return self._get_nested("ctek", "refresh_token") or ""
+
+    @property
+    def ctek_token_expires_at(self) -> str:
+        return self._get_nested("ctek", "token_expires_at") or ""
+
+    def save_ctek_token(
+        self, access_token: str, refresh_token: str | None, expires_in: int
+    ) -> None:
+        import datetime
+
+        logger.info(
+            "save_ctek_token called with token: %s",
+            access_token[:50] if access_token else "None",
+        )
+        content = self._secrets_path.read_text()
+        lines = content.splitlines()
+        new_lines = []
+        in_ctek_section = False
+        updated_access = False
+        updated_refresh = False
+        updated_expires = False
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("[ctek]"):
+                in_ctek_section = True
+            elif stripped.startswith("["):
+                in_ctek_section = False
+
+            if in_ctek_section:
+                if "access_token" in line and "=" in line:
+                    new_lines.append(f'access_token = "{access_token}"')
+                    updated_access = True
+                    continue
+                elif "refresh_token" in line and "=" in line:
+                    new_lines.append(f'refresh_token = "{refresh_token or ""}"')
+                    updated_refresh = True
+                    continue
+                elif "token_expires_at" in line and "=" in line:
+                    expires_at = datetime.datetime.now() + datetime.timedelta(
+                        seconds=expires_in - 60
+                    )
+                    new_lines.append(f'token_expires_at = "{expires_at.isoformat()}"')
+                    updated_expires = True
+                    continue
+
+            new_lines.append(line)
+
+        if not updated_access:
+            new_lines.append("")
+            new_lines.append("[ctek]")
+            new_lines.append(f'access_token = "{access_token}"')
+        if not updated_refresh and refresh_token:
+            if not any(line.strip() == "[ctek]" for line in new_lines):
+                new_lines.append("")
+                new_lines.append("[ctek]")
+            new_lines.append(f'refresh_token = "{refresh_token}"')
+        if not updated_expires:
+            if not any(line.strip() == "[ctek]" for line in new_lines):
+                new_lines.append("")
+                new_lines.append("[ctek]")
+            expires_at = datetime.datetime.now() + datetime.timedelta(
+                seconds=expires_in - 60
+            )
+            new_lines.append(f'token_expires_at = "{expires_at.isoformat()}"')
+
+        self._secrets_path.write_text("\n".join(new_lines) + "\n")
+        self._cache = None
+        logger.info(f"Saved ctek access token to {self._secrets_path}")
