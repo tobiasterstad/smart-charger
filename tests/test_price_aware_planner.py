@@ -6,7 +6,9 @@ from unittest import mock
 
 import pytest
 
-from smart_charger import planner
+from smart_charger.planner import models as planner_models
+from smart_charger.planner import base as planner_base
+from smart_charger.planner import price as planner_price
 from smart_charger.secrets import Secrets
 from smart_charger.config import ChargerConfiguration
 from smart_charger.planner import PriceAwarePlanner, VehicleStatus
@@ -46,12 +48,12 @@ class TestPriceAwarePlanner(unittest.TestCase):
         self._patchers = []
 
     def set_now(self, fixed_dt: datetime.datetime):
-        # Patch planner.get_now to return fixed_dt
-        p = __import__("unittest.mock").mock.patch.object(
-            planner, "get_now", lambda: fixed_dt
-        )
-        p.start()
-        self._patchers.append(p)
+        # Patch get_now in ALL modules where it's imported
+        # Use default arg to capture value, not reference
+        for module in [planner_models, planner_base, planner_price]:
+            p = mock.patch.object(module, "get_now", lambda dt=fixed_dt: dt)
+            p.start()
+            self._patchers.append(p)
 
     def _count_hours_in_steps(
         self, steps: List[planner.ChargingStep], current: int
@@ -70,9 +72,9 @@ class TestPriceAwarePlanner(unittest.TestCase):
         config = ChargerConfiguration.load_defaults()
         # make night hours (0-6) cheap
         provider = SimpleTariffProvider(list(range(0, 7)))
-        planner_obj = planner.PriceAwarePlanner(config, price_provider=provider)
+        planner_obj = PriceAwarePlanner(config, price_provider=provider)
 
-        vehicle = planner.VehicleStatus(id="leaf", soc=50)
+        vehicle = VehicleStatus(id="leaf", soc=50)
         plan = planner_obj.plan_charging(vehicle)
 
         # Ensure planner produced some hours and that total energy meets or exceeds the requested
@@ -102,10 +104,10 @@ class TestPriceAwarePlanner(unittest.TestCase):
         config = ChargerConfiguration.load_defaults()
         # make a run of cheap consecutive hours 22,23,0,1,2
         provider = SimpleTariffProvider([22, 23, 0, 1, 2])
-        planner_obj = planner.PriceAwarePlanner(config, price_provider=provider)
+        planner_obj = PriceAwarePlanner(config, price_provider=provider)
 
         # Vehicle needs around 4 hours (as in previous test)
-        vehicle = planner.VehicleStatus(id="leaf", soc=50)
+        vehicle = VehicleStatus(id="leaf", soc=50)
         plan = planner_obj.plan_charging(vehicle)
 
         # All chosen hours should be among the cheap set; and because they are consecutive
@@ -129,9 +131,9 @@ class TestPriceAwarePlanner(unittest.TestCase):
         self.set_now(fixed_dt)
 
         config = ChargerConfiguration.load_defaults()
-        planner_obj = planner.PriceAwarePlanner(config, price_provider=None)
+        planner_obj = PriceAwarePlanner(config, price_provider=None)
 
-        vehicle = planner.VehicleStatus(id="leaf", soc=50)
+        vehicle = VehicleStatus(id="leaf", soc=50)
         plan = planner_obj.plan_charging(vehicle)
 
         assert plan.charge_hours > 0
@@ -147,27 +149,25 @@ class TestPriceAwarePlanner(unittest.TestCase):
 
         config = ChargerConfiguration.load_defaults()
         provider = SimpleTariffProvider([0, 1, 2, 3, 4, 5, 6])
-        planner_obj = planner.PriceAwarePlanner(config, price_provider=provider)
+        planner_obj = PriceAwarePlanner(config, price_provider=provider)
 
-        vehicle = planner.VehicleStatus(id="leaf", soc=0)  # large demand
+        vehicle = VehicleStatus(id="leaf", soc=0)  # large demand
         plan = planner_obj.plan_charging(vehicle)
 
         # compute expected candidate count using same logic as planner
-        now = planner.get_now()
+        from smart_charger.planner import BasePlanner, get_now
+
+        now = get_now()
         if now.hour < 7:
-            night_start = planner.BasePlanner._get_timestamp_from_hour(
+            night_start = BasePlanner._get_timestamp_from_hour(
                 "00:00", increment_days=0
             )
-            night_end = planner.BasePlanner._get_timestamp_from_hour(
-                "07:00", increment_days=0
-            )
+            night_end = BasePlanner._get_timestamp_from_hour("07:00", increment_days=0)
         else:
-            night_start = planner.BasePlanner._get_timestamp_from_hour(
+            night_start = BasePlanner._get_timestamp_from_hour(
                 "00:00", increment_days=1
             )
-            night_end = planner.BasePlanner._get_timestamp_from_hour(
-                "07:00", increment_days=1
-            )
+            night_end = BasePlanner._get_timestamp_from_hour("07:00", increment_days=1)
 
         start_hour = now.replace(minute=0, second=0, microsecond=0)
         if now.minute > 0 or now.second > 0 or now.microsecond > 0:

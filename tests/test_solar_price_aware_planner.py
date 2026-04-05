@@ -7,7 +7,9 @@ from unittest import mock
 
 import pytest
 
-from smart_charger import planner
+from smart_charger.planner import models as planner_models
+from smart_charger.planner import base as planner_base
+from smart_charger.planner import solar_price as planner_solar_price
 from smart_charger.config import ChargerConfiguration
 from smart_charger.planner import (
     SolarPriceAwarePlanner,
@@ -148,10 +150,12 @@ class TestSolarPriceAwarePlanner(unittest.TestCase):
         self._patchers = []
 
     def set_now(self, fixed_dt: datetime.datetime):
-        """Patch planner.get_now to return fixed_dt."""
-        p = mock.patch.object(planner, "get_now", lambda: fixed_dt)
-        p.start()
-        self._patchers.append(p)
+        """Patch get_now in ALL modules where it's imported."""
+        # Use default arg to capture value, not reference
+        for module in [planner_models, planner_base, planner_solar_price]:
+            p = mock.patch.object(module, "get_now", lambda dt=fixed_dt: dt)
+            p.start()
+            self._patchers.append(p)
 
     def test_prefers_solar_hours_when_cheap(self):
         """Should prefer hours with solar production (lower effective price)."""
@@ -377,9 +381,11 @@ class TestSolarPriceAwarePlannerIntegration(unittest.TestCase):
         self._patchers = []
 
     def set_now(self, fixed_dt: datetime.datetime):
-        p = mock.patch.object(planner, "get_now", lambda: fixed_dt)
-        p.start()
-        self._patchers.append(p)
+        # Use default arg to capture value, not reference
+        for module in [planner_models, planner_base, planner_solar_price]:
+            p = mock.patch.object(module, "get_now", lambda dt=fixed_dt: dt)
+            p.start()
+            self._patchers.append(p)
 
     def test_real_world_scenario_summer_day(self):
         """Test a realistic summer day scenario."""
