@@ -142,8 +142,8 @@ class ZaptecCharger(BaseCharger):
             except Exception as e:
                 if "scheduled power management" in str(e).lower():
                     logger.warning(
-                        f"Cannot update installation current: Zaptec is in scheduled power management mode. "
-                        f"Skipping current adjustment."
+                        "Cannot update installation current: Zaptec is in scheduled power management mode. "
+                        "Skipping current adjustment."
                     )
                 else:
                     logger.exception("Failed to update Zaptec installation current")
