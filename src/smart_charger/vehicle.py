@@ -1,5 +1,5 @@
 import enum
-from typing import Any, Optional
+from typing import Any
 from pydantic import BaseModel, ConfigDict, model_validator
 
 

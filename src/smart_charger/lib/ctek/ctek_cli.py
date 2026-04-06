@@ -45,7 +45,7 @@ class CtekMeterService:
         def on_disconnect(_client, _userdata, rc):
             if rc != 0:
                 logger.warning(
-                    f"Unexpected disconnect from MQTT, return code %d. Reconnecting...",
+                    "Unexpected disconnect from MQTT, return code %d. Reconnecting...",
                     rc,
                 )
                 try:

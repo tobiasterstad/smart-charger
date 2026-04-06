@@ -1,7 +1,7 @@
 import logging
 import random
 import threading
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from paho.mqtt import client as mqtt_client
 
@@ -17,11 +17,6 @@ RECONNECT_DELAY_SECONDS = 5
 RECONNECT_DELAY_MAX_SECONDS = 300
 
 
-def _schedule_delayed_call(delay: float, callback: Callable[[], None]) -> None:
-    """Schedule a callback to run after a delay using a background thread."""
-    threading.Timer(delay, callback).start()
-
-
 class MessageListener:
     def __init__(
         self,
@@ -35,7 +30,13 @@ class MessageListener:
 
         # Generate a Client ID
         self.client_id = f"smartcharger-listener-{random.randint(0, 1000)}"
-        self.client = None  # MQTT client
+        self.client: Optional[mqtt_client.Client] = None
+
+        # Reconnection state
+        self._reconnect_delay = RECONNECT_DELAY_SECONDS
+        self._reconnect_timer: Optional[threading.Timer] = None
+        self._reconnect_lock = threading.Lock()
+        self._is_reconnecting = False
 
         # listeners
         self._on_connected_charger_listeners: list[Callable[[BaseCharger], None]] = []
@@ -81,13 +82,26 @@ class MessageListener:
     ) -> None:
         self._on_energy_accumulated_hourly_changed.append(callback)
 
-    def connect_mqtt(self):
-        self._reconnect_delay = RECONNECT_DELAY_SECONDS
+    def _cleanup_client(self):
+        """Safely cleanup the existing MQTT client."""
+        if self.client is not None:
+            try:
+                self.client.loop_stop()
+            except Exception:
+                pass
+            try:
+                self.client.disconnect()
+            except Exception:
+                pass
+            self.client = None
 
+    def connect_mqtt(self):
         def on_connect(client, userdata, flags, rc):
             if rc == 0:
                 logger.info("Connected to MQTT Broker!")
-                self._reconnect_delay = RECONNECT_DELAY_SECONDS
+                with self._reconnect_lock:
+                    self._reconnect_delay = RECONNECT_DELAY_SECONDS
+                    self._is_reconnecting = False
             else:
                 logger.error("Failed to connect, return code %d\n", rc)
 
@@ -108,20 +122,48 @@ class MessageListener:
         return client
 
     def _schedule_reconnect(self):
-        logger.info(f"Scheduling MQTT reconnection in {self._reconnect_delay} seconds")
-        _schedule_delayed_call(self._reconnect_delay, self._do_reconnect)
-        self._reconnect_delay = min(
-            self._reconnect_delay * 2, RECONNECT_DELAY_MAX_SECONDS
-        )
+        """Schedule a reconnect, preventing multiple concurrent reconnect attempts."""
+        with self._reconnect_lock:
+            # Don't schedule if already reconnecting
+            if self._is_reconnecting:
+                logger.debug("Reconnect already scheduled, skipping")
+                return
+
+            self._is_reconnecting = True
+
+            # Cancel any existing timer
+            if self._reconnect_timer is not None:
+                self._reconnect_timer.cancel()
+                self._reconnect_timer = None
+
+            logger.info(
+                f"Scheduling MQTT reconnection in {self._reconnect_delay} seconds"
+            )
+            self._reconnect_timer = threading.Timer(
+                self._reconnect_delay, self._do_reconnect
+            )
+            self._reconnect_timer.start()
+
+            # Exponential backoff
+            self._reconnect_delay = min(
+                self._reconnect_delay * 2, RECONNECT_DELAY_MAX_SECONDS
+            )
 
     def _do_reconnect(self):
+        """Perform the actual reconnection."""
         try:
             logger.info("Attempting MQTT reconnection...")
+
+            # Cleanup old client first to prevent file descriptor leak
+            self._cleanup_client()
+
             self.client = self.connect_mqtt()
             self.subscribe(self.client)
             self.client.loop_start()
         except Exception as e:
             logger.error(f"Failed to reconnect: {e}")
+            with self._reconnect_lock:
+                self._is_reconnecting = False
             self._schedule_reconnect()
 
     def _handle_float_message(
@@ -232,32 +274,52 @@ class MessageListener:
             listener(value)
 
     def start(self):
+        self._reconnect_delay = RECONNECT_DELAY_SECONDS
         self.client = self.connect_mqtt()
         self.subscribe(self.client)
         self.client.loop_start()
 
     def cleanup(self):
-        # cleanup mqtt client
-        self.client.loop_stop()
-        try:
-            self.client.disconnect()
-        except Exception:
-            pass
+        """Cleanup MQTT client and cancel any pending reconnect timers."""
+        with self._reconnect_lock:
+            if self._reconnect_timer is not None:
+                self._reconnect_timer.cancel()
+                self._reconnect_timer = None
+        self._cleanup_client()
 
 
 class MessageSender:
     def __init__(self, config: ChargerConfiguration):
         self.config = config
         self.client_id = f"smartcharger-sender-{random.randint(0, 1000)}"
-        self.client = None
+        self.client: Optional[mqtt_client.Client] = None
+
+        # Reconnection state
+        self._reconnect_delay = RECONNECT_DELAY_SECONDS
+        self._reconnect_timer: Optional[threading.Timer] = None
+        self._reconnect_lock = threading.Lock()
+        self._is_reconnecting = False
+
+    def _cleanup_client(self):
+        """Safely cleanup the existing MQTT client."""
+        if self.client is not None:
+            try:
+                self.client.loop_stop()
+            except Exception:
+                pass
+            try:
+                self.client.disconnect()
+            except Exception:
+                pass
+            self.client = None
 
     def connect_mqtt(self):
-        self._reconnect_delay = RECONNECT_DELAY_SECONDS
-
         def on_connect(client, userdata, flags, rc):
             if rc == 0:
                 logger.info("Connected to MQTT Broker!")
-                self._reconnect_delay = RECONNECT_DELAY_SECONDS
+                with self._reconnect_lock:
+                    self._reconnect_delay = RECONNECT_DELAY_SECONDS
+                    self._is_reconnecting = False
             else:
                 logger.error("Failed to connect, return code %d\n", rc)
 
@@ -278,32 +340,62 @@ class MessageSender:
         return client
 
     def _schedule_reconnect(self):
-        logger.info(f"Scheduling MQTT reconnection in {self._reconnect_delay} seconds")
-        _schedule_delayed_call(self._reconnect_delay, self._do_reconnect)
-        self._reconnect_delay = min(
-            self._reconnect_delay * 2, RECONNECT_DELAY_MAX_SECONDS
-        )
+        """Schedule a reconnect, preventing multiple concurrent reconnect attempts."""
+        with self._reconnect_lock:
+            # Don't schedule if already reconnecting
+            if self._is_reconnecting:
+                logger.debug("Reconnect already scheduled, skipping")
+                return
+
+            self._is_reconnecting = True
+
+            # Cancel any existing timer
+            if self._reconnect_timer is not None:
+                self._reconnect_timer.cancel()
+                self._reconnect_timer = None
+
+            logger.info(
+                f"Scheduling MQTT reconnection in {self._reconnect_delay} seconds"
+            )
+            self._reconnect_timer = threading.Timer(
+                self._reconnect_delay, self._do_reconnect
+            )
+            self._reconnect_timer.start()
+
+            # Exponential backoff
+            self._reconnect_delay = min(
+                self._reconnect_delay * 2, RECONNECT_DELAY_MAX_SECONDS
+            )
 
     def _do_reconnect(self):
+        """Perform the actual reconnection."""
         try:
             logger.info("Attempting MQTT reconnection...")
+
+            # Cleanup old client first to prevent file descriptor leak
+            self._cleanup_client()
+
             self.client = self.connect_mqtt()
             self.client.loop_start()
         except Exception as e:
             logger.error(f"Failed to reconnect: {e}")
+            with self._reconnect_lock:
+                self._is_reconnecting = False
             self._schedule_reconnect()
 
     def start(self):
+        self._reconnect_delay = RECONNECT_DELAY_SECONDS
         self.client = self.connect_mqtt()
         self.client.loop_start()
 
     def publish(self, topic, data):
-        self.client.publish(topic, data)
+        if self.client is not None:
+            self.client.publish(topic, data)
 
     def cleanup(self):
-        # cleanup mqtt client
-        self.client.loop_stop()
-        try:
-            self.client.disconnect()
-        except Exception:
-            pass
+        """Cleanup MQTT client and cancel any pending reconnect timers."""
+        with self._reconnect_lock:
+            if self._reconnect_timer is not None:
+                self._reconnect_timer.cancel()
+                self._reconnect_timer = None
+        self._cleanup_client()

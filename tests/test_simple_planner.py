@@ -1,8 +1,11 @@
 import datetime
 import math
 import unittest
+from unittest import mock
 
-from smart_charger import planner
+from smart_charger.planner import simple as planner_simple
+from smart_charger.planner import base as planner_base
+from smart_charger.planner import models as planner_models
 from smart_charger.config import ChargerConfiguration
 from smart_charger.planner import SimpleHourPlanner, VehicleStatus
 
@@ -21,12 +24,13 @@ class TestPlanner(unittest.TestCase):
         self._patchers = []
 
     def set_now(self, fixed_dt: datetime.datetime):
-        # Patch planner.get_now to return fixed_dt
-        p = __import__("unittest.mock").mock.patch.object(
-            planner, "get_now", lambda: fixed_dt
-        )
-        p.start()
-        self._patchers.append(p)
+        # Patch get_now in ALL modules where it's imported
+        # This is necessary because `from .models import get_now` creates local refs
+        # Use default arg to capture value, not reference
+        for module in [planner_models, planner_base, planner_simple]:
+            p = mock.patch.object(module, "get_now", lambda dt=fixed_dt: dt)
+            p.start()
+            self._patchers.append(p)
 
     def test_simple_planner_prioritizes_night_when_enough_time(self):
         # now = 2026-01-22 20:00 -> full night window next day is available (7h)

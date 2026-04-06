@@ -203,8 +203,14 @@ class ZaptecClient:
         ):
             if not self._username or not self._password:
                 raise Exception("Not authenticated and no credentials available")
-            logger.info("Token expired, re-authenticating")
-            self.authenticate(self._username, self._password)
+            logger.info("Token expired or invalid, re-authenticating")
+            try:
+                self.authenticate(self._username, self._password)
+            except Exception as e:
+                logger.error("Token re-authentication failed: %s", e)
+                self.access_token = None
+                self._token_expires_at = None
+                raise Exception("Failed to authenticate with Zaptec API") from e
 
     @staticmethod
     def _get_access_token(
