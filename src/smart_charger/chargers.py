@@ -1,6 +1,8 @@
 import abc
+import datetime
 import enum
 import logging
+import time
 from dataclasses import dataclass
 from pydantic import BaseModel, PrivateAttr
 from smart_charger.config import ChargerType
@@ -8,6 +10,8 @@ from smart_charger.zaptec import ZaptecClient, ChargerCommands, OperatingMode
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+SCHEDULED_POWER_MGMT_COOLDOWN_SECONDS = 300
 
 
 class ChargerStatus(enum.Enum):
@@ -102,10 +106,17 @@ class ZaptecCharger(BaseCharger):
 
     settings: ZaptecSettings
     _client: Optional[ZaptecClient] = PrivateAttr(None)
+    _scheduled_power_mgmt_cooldown_until: float = PrivateAttr(0.0)
+
+    def _is_in_scheduled_power_mgmt_cooldown(self) -> bool:
+        return time.time() < self._scheduled_power_mgmt_cooldown_until
+
+    def _set_scheduled_power_mgmt_cooldown(self) -> None:
+        self._scheduled_power_mgmt_cooldown_until = (
+            time.time() + SCHEDULED_POWER_MGMT_COOLDOWN_SECONDS
+        )
 
     def model_post_init(self, __context):
-        import datetime
-
         token_expires_at = None
         if self.settings.token_expires_at:
             token_expires_at = datetime.datetime.fromisoformat(
@@ -126,13 +137,16 @@ class ZaptecCharger(BaseCharger):
         return ChargerType.ZAPTEC
 
     def set_current(self, current: float):
-        # call base validation
         super().set_current(current)
         logger.info("Set current to %s A on Zaptec charger %s", current, self.id)
         if self.read_only:
             logger.info("Read-only mode: skipping actual current update")
             return
-        # use the client if available; tolerate missing client for tests/mocks
+        if self._is_in_scheduled_power_mgmt_cooldown():
+            logger.debug(
+                "Skipping current update: in scheduled power management cooldown"
+            )
+            return
         if self._client is not None:
             try:
                 self._client.update_installation(
@@ -143,42 +157,73 @@ class ZaptecCharger(BaseCharger):
                 if "scheduled power management" in str(e).lower():
                     logger.warning(
                         "Cannot update installation current: Zaptec is in scheduled power management mode. "
-                        "Skipping current adjustment."
+                        "Skipping current adjustment for %s seconds.",
+                        SCHEDULED_POWER_MGMT_COOLDOWN_SECONDS,
                     )
+                    self._set_scheduled_power_mgmt_cooldown()
                 else:
                     logger.exception("Failed to update Zaptec installation current")
 
     def start_charging(self):
-        super().start_charging()
-        logger.info(f"Starting Zaptec charger ID: {self.id}")
+        logger.info("Starting Zaptec charger ID: %s", self.id)
         if self.read_only:
             logger.info("Read-only mode: skipping actual start command")
+            self.status = ChargerStatus.CHARGING
+            return
+        if self._is_in_scheduled_power_mgmt_cooldown():
+            logger.debug(
+                "Skipping start charging: in scheduled power management cooldown"
+            )
             return
         try:
             current_status = self.get_status()
             if current_status == OperatingMode.Connected_Charging:
                 logger.info(
-                    f"Charger {self.id} is already charging, skipping START command"
+                    "Charger %s is already charging, skipping START command", self.id
                 )
+                self.status = ChargerStatus.CHARGING
                 return
             self._client.send_charger_command(
                 charger_id=self.settings.charger_id, command_id=ChargerCommands.START
             )
+            self.status = ChargerStatus.CHARGING
         except Exception as e:
-            logger.exception("Failed to start charging", e)
+            if "scheduled power management" in str(e).lower():
+                logger.warning(
+                    "Cannot start charging: Zaptec is in scheduled power management mode. "
+                    "Skipping start command for %s seconds.",
+                    SCHEDULED_POWER_MGMT_COOLDOWN_SECONDS,
+                )
+                self._set_scheduled_power_mgmt_cooldown()
+            else:
+                logger.exception("Failed to start charging")
 
     def stop_charging(self):
-        super().stop_charging()
-        logger.info(f"Stopping Zaptec charger ID: {self.id}")
+        logger.info("Stopping Zaptec charger ID: %s", self.id)
         if self.read_only:
             logger.info("Read-only mode: skipping actual stop command")
+            self.status = ChargerStatus.CONNECTED
+            return
+        if self._is_in_scheduled_power_mgmt_cooldown():
+            logger.debug(
+                "Skipping stop charging: in scheduled power management cooldown"
+            )
             return
         try:
             self._client.send_charger_command(
                 charger_id=self.settings.charger_id, command_id=ChargerCommands.STOP
             )
+            self.status = ChargerStatus.CONNECTED
         except Exception as e:
-            logger.exception("Failed to start charging", e)
+            if "scheduled power management" in str(e).lower():
+                logger.warning(
+                    "Cannot stop charging: Zaptec is in scheduled power management mode. "
+                    "Skipping stop command for %s seconds.",
+                    SCHEDULED_POWER_MGMT_COOLDOWN_SECONDS,
+                )
+                self._set_scheduled_power_mgmt_cooldown()
+            else:
+                logger.exception("Failed to stop charging")
 
     def get_status(self) -> OperatingMode:
         details = self._client.get_charger_details(charger_id=self.settings.charger_id)
